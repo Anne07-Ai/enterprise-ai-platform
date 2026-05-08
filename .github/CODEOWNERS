@@ -1,0 +1,29 @@
+# Code ownership for review routing.
+# Last matching pattern wins, so order from general → specific.
+
+# Default owner — a real review on every change.
+*                                       @lakshmianne
+
+# Documentation
+/README.md                              @lakshmianne
+/ARCHITECTURE.md                        @lakshmianne
+/ROADMAP.md                             @lakshmianne
+/SECURITY.md                            @lakshmianne
+/CONTRIBUTING.md                        @lakshmianne
+/docs/                                  @lakshmianne
+/docs/adr/                              @lakshmianne
+/docs/runbooks/                         @lakshmianne
+
+# Infrastructure / observability
+/docker-compose.yml                     @lakshmianne
+/Makefile                               @lakshmianne
+/scripts/                               @lakshmianne
+/observability/                         @lakshmianne
+/infra/                                 @lakshmianne
+/.github/                               @lakshmianne
+
+# Application code (placeholders for Phase 2+)
+/apps/api/                              @lakshmianne
+/apps/web/                              @lakshmianne
+/workers/                               @lakshmianne
+/packages/                              @lakshmianne

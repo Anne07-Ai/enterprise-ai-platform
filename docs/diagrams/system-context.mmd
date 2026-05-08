@@ -1,0 +1,86 @@
+%% Enterprise AI Workflow Platform — System Context
+%% Render: mmdc -i system-context.mmd -o system-context.png -t default -b transparent
+flowchart LR
+  classDef edge fill:#1f2937,stroke:#111827,color:#f9fafb
+  classDef api fill:#0e7490,stroke:#155e75,color:#f0fdfa
+  classDef ai fill:#7c3aed,stroke:#5b21b6,color:#f5f3ff
+  classDef data fill:#0f766e,stroke:#134e4a,color:#ecfdf5
+  classDef async fill:#b45309,stroke:#78350f,color:#fffbeb
+  classDef worker fill:#9d174d,stroke:#831843,color:#fdf2f8
+  classDef obs fill:#1d4ed8,stroke:#1e3a8a,color:#eff6ff
+  classDef ext fill:#374151,stroke:#1f2937,color:#f3f4f6,stroke-dasharray: 5 3
+
+  Browser[Browser]:::edge
+  Web[Next.js<br/>Web App]:::edge
+
+  subgraph API_Plane["FastAPI Gateway (modular monolith)"]
+    direction TB
+    Identity[Identity]:::api
+    Workspaces[Workspaces]:::api
+    Documents[Documents]:::api
+    Conversations[Conversations]:::api
+    Agents[Agents]:::api
+    Usage[Usage]:::api
+  end
+
+  LLMGW[LLM Gateway]:::ai
+  Anthropic[(Anthropic API)]:::ext
+  OpenAI[(OpenAI / Bedrock<br/>fallback)]:::ext
+
+  Postgres[(Postgres 16<br/>+ pgvector)]:::data
+  Redis[(Redis 7)]:::data
+  MinIO[(MinIO<br/>Object Storage)]:::data
+
+  Kafka{{Redpanda<br/>Kafka API}}:::async
+
+  Ingestion[Ingestion<br/>Worker]:::worker
+  Embedding[Embedding<br/>Worker]:::worker
+  AgentRuntime[Agent<br/>Runtime]:::worker
+  EvalWorker[Eval<br/>Worker]:::worker
+
+  OTel[OTel Collector]:::obs
+  Prom[(Prometheus)]:::obs
+  Loki[(Loki)]:::obs
+  Tempo[(Tempo)]:::obs
+  Grafana[Grafana]:::obs
+
+  IdP[(Customer IdP<br/>OIDC)]:::ext
+
+  Browser --> Web --> API_Plane
+  API_Plane --> LLMGW
+  LLMGW --> Anthropic
+  LLMGW -.fallback.-> OpenAI
+
+  API_Plane --> Postgres
+  API_Plane --> Redis
+  API_Plane --> Kafka
+  API_Plane -. signed URLs .-> MinIO
+
+  Kafka --> Ingestion
+  Kafka --> Embedding
+  Kafka --> AgentRuntime
+  Kafka --> EvalWorker
+
+  Ingestion --> Postgres
+  Ingestion --> MinIO
+  Embedding --> Postgres
+  Embedding --> LLMGW
+  AgentRuntime --> Postgres
+  AgentRuntime --> LLMGW
+  EvalWorker --> Postgres
+
+  Identity -. OIDC .-> IdP
+
+  API_Plane -. traces/metrics/logs .-> OTel
+  Ingestion -. traces/metrics/logs .-> OTel
+  Embedding -. traces/metrics/logs .-> OTel
+  AgentRuntime -. traces/metrics/logs .-> OTel
+  EvalWorker -. traces/metrics/logs .-> OTel
+  LLMGW -. traces/metrics/logs .-> OTel
+
+  OTel --> Prom
+  OTel --> Loki
+  OTel --> Tempo
+  Prom --> Grafana
+  Loki --> Grafana
+  Tempo --> Grafana

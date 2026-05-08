@@ -1,0 +1,58 @@
+# Keep image build contexts small and reproducible.
+
+.git/
+.github/
+.gitignore
+.gitattributes
+.editorconfig
+.pre-commit-config.yaml
+.dockerignore
+
+# Docs and ADRs do not belong in any service image.
+docs/
+README.md
+ARCHITECTURE.md
+CONTRIBUTING.md
+ROADMAP.md
+SECURITY.md
+LICENSE
+
+# Local infra config — used by docker-compose, not by service builds.
+docker-compose.yml
+docker-compose.*.yml
+Makefile
+scripts/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Python build & cache artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / TS
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Test artifacts
+coverage/
+.eslintcache
+
+# Local env
+.env
+.env.*
+!.env.example

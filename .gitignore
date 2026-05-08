@@ -1,0 +1,65 @@
+# --- Secrets / local config -----------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Editor / OS ----------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# --- Node / TypeScript ----------------------------------------------------
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+.npm/
+.pnpm-store/
+.yarn/
+
+# --- Build / runtime artifacts --------------------------------------------
+*.log
+*.pid
+tmp/
+.tmp/
+
+# --- Docker volumes (if anyone bind-mounts) -------------------------------
+docker-data/
+
+# --- Rendered diagrams (regenerated from .mmd) ----------------------------
+# Diagram PNGs are intentionally NOT ignored — they are committed alongside
+# their .mmd source so the README can embed them. Do not add *.png here.
+
+# --- Terraform ------------------------------------------------------------
+.terraform/
+*.tfstate
+*.tfstate.backup
+crash.log
+override.tf
+override.tf.json
+
+# --- Local artifacts ------------------------------------------------------
+coverage/
+.eslintcache
+*.local
+*.bak

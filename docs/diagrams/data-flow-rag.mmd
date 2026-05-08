@@ -1,0 +1,57 @@
+%% Enterprise AI Workflow Platform — RAG data flow
+%% Document upload through chat citation
+%% Render: mmdc -i data-flow-rag.mmd -o data-flow-rag.png -t default -b transparent
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant W as Next.js Web
+  participant A as FastAPI Gateway
+  participant S as MinIO (S3)
+  participant P as Postgres + pgvector
+  participant K as Redpanda
+  participant I as Ingestion Worker
+  participant E as Embedding Worker
+  participant G as LLM Gateway
+  participant L as LLM Provider
+
+  Note over U,A: Phase 1 — upload
+  U->>W: select PDF
+  W->>A: POST /v1/documents (multipart)
+  A->>S: PutObject(bytes)
+  A->>P: INSERT documents (status=uploaded, org_id, workspace_id)
+  A->>K: produce documents.uploaded.v1<br/>{document_id, org_id, s3_key, traceparent}
+  A-->>W: 202 Accepted {document_id, status: uploaded}
+
+  Note over K,I: Phase 2 — parse + chunk
+  K-->>I: consume documents.uploaded.v1
+  I->>S: GetObject(s3_key)
+  I->>I: parse (Unstructured) + chunk
+  I->>P: INSERT chunks (embedding=NULL)
+  I->>P: UPDATE documents SET status=parsed
+  I->>K: produce documents.parsed.v1<br/>{document_id, chunk_ids[]}
+
+  Note over K,E: Phase 3 — embed
+  K-->>E: consume documents.parsed.v1
+  E->>L: embed batch (via provider abstraction)
+  L-->>E: vectors
+  E->>P: UPDATE chunks SET embedding = $vec, embedding_model_version = $v
+  E->>P: UPDATE documents SET status=ready
+  E->>K: produce documents.embedded.v1
+
+  Note over U,L: Phase 4 — chat with citations (later)
+  U->>W: ask question
+  W->>A: POST /v1/conversations/:id/messages (Accept: text/event-stream)
+  A->>P: SET LOCAL app.current_org_id = $org
+  A->>P: hybrid search (vector + pg_trgm) → top_k chunks
+  A->>G: complete_streaming(messages, retrieved_context, tools=[])
+  G->>L: provider streaming call
+  loop tokens arrive
+    L-->>G: token delta
+    G-->>A: ProviderEvent.TokenDelta
+    A-->>W: SSE event: token
+  end
+  G-->>A: ProviderEvent.Stop
+  A-->>W: SSE event: citation (per cited chunk_id)
+  A-->>W: SSE event: end
+  A->>P: INSERT messages (assistant) + message_citations
+  A->>K: produce conversations.message.v1 (for usage accounting)
