@@ -46,12 +46,43 @@ repos:
         stages: [commit-msg]
         args: [feat, fix, docs, infra, chore, refactor, test, build, ci, perf, revert]
 
-  # Python lint + format — uncomment once apps/api/ exists.
-  # - repo: https://github.com/astral-sh/ruff-pre-commit
-  #   rev: v0.6.5
-  #   hooks:
-  #     - id: ruff
-  #     - id: ruff-format
+  # Python lint + format (Phase 2 onwards).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        files: ^apps/api/.*\.py$
+      - id: ruff-format
+        files: ^apps/api/.*\.py$
+
+  # mypy strict over the API package.
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        files: ^apps/api/app/.*\.py$
+        args: [--strict, --config-file=apps/api/pyproject.toml]
+        additional_dependencies:
+          - pydantic>=2.10
+          - pydantic-settings>=2.7
+          - sqlalchemy>=2.0
+          - types-redis
+
+  # Static security scanning of the API package.
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        args: [-c, apps/api/pyproject.toml, --severity-level, medium]
+        files: ^apps/api/app/.*\.py$
+        additional_dependencies: ["bandit[toml]"]
+
+  # Secret scanning.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
 
   # TypeScript / web lint — uncomment once apps/web/ exists.
   # - repo: local

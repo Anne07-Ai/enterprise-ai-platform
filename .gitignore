@@ -1,65 +1,58 @@
-# --- Secrets / local config -----------------------------------------------
-.env
-.env.*
-!.env.example
 
-# --- Editor / OS ----------------------------------------------------------
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-.idea/
-.vscode/*
+__pycache__/
+!.env.example
 !.vscode/extensions.json
 !.vscode/settings.json.example
-
-# --- Python ---------------------------------------------------------------
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-.venv/
-venv/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 .coverage
-htmlcov/
-dist/
-build/
-
-# --- Node / TypeScript ----------------------------------------------------
-node_modules/
+.DS_Store
+.env
+.env.*
+.eslintcache
+.idea/
+.mypy_cache/
 .next/
-.turbo/
-*.tsbuildinfo
 .npm/
 .pnpm-store/
+.pytest_cache/
+.ruff_cache/
+.terraform/
+.tmp/
+.turbo/
+.venv/
+.vscode/*
 .yarn/
-
-# --- Build / runtime artifacts --------------------------------------------
+*.egg-info/
+*.local
 *.log
 *.pid
-tmp/
-.tmp/
-
-# --- Docker volumes (if anyone bind-mounts) -------------------------------
-docker-data/
-
-# --- Rendered diagrams (regenerated from .mmd) ----------------------------
-# Diagram PNGs are intentionally NOT ignored — they are committed alongside
-# their .mmd source so the README can embed them. Do not add *.png here.
-
-# --- Terraform ------------------------------------------------------------
-.terraform/
+*.py[cod]
+*.pyc
+*.swo
+*.swp
 *.tfstate
 *.tfstate.backup
+*.tsbuildinfo
+*$py.class
+# --- Build / runtime artifacts --------------------------------------------
+# --- Docker volumes (if anyone bind-mounts) -------------------------------
+# --- Editor / OS ----------------------------------------------------------
+# --- Local artifacts ------------------------------------------------------
+# --- Node / TypeScript ----------------------------------------------------
+# --- Python ---------------------------------------------------------------
+# --- Rendered diagrams (regenerated from .mmd) ----------------------------
+# --- Secrets / local config -----------------------------------------------
+# --- Terraform ------------------------------------------------------------
+# Diagram PNGs are intentionally NOT ignored — they are committed alongside
+# their .mmd source so the README can embed them. Do not add *.png here.
+build/
+coverage/
 crash.log
+dist/
+docker-data/
+htmlcov/
+node_modules/
 override.tf
 override.tf.json
-
-# --- Local artifacts ------------------------------------------------------
-coverage/
-.eslintcache
-*.local
-*.bak
+Thumbs.db
+tmp/
+venv/

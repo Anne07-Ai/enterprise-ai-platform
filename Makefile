@@ -82,6 +82,36 @@ redis-cli: ## open a redis-cli shell into the redis container
 rpk: ## open an rpk shell into the redpanda container (e.g. make rpk -- topic list)
 	@$(COMPOSE) exec redpanda rpk $(filter-out $@,$(MAKECMDGOALS))
 
+# --- API service (Phase 2) ------------------------------------------------
+
+.PHONY: api-dev
+api-dev: ## run the API locally with hot-reload (requires uv)
+	@cd apps/api && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+.PHONY: api-test
+api-test: ## run the api test suite (testcontainers)
+	@cd apps/api && uv run pytest -v
+
+.PHONY: api-lint
+api-lint: ## ruff check + format check on apps/api
+	@cd apps/api && uv run ruff check . && uv run ruff format --check .
+
+.PHONY: api-typecheck
+api-typecheck: ## mypy strict on apps/api/app
+	@cd apps/api && uv run mypy app/
+
+.PHONY: api-migrate
+api-migrate: ## alembic upgrade head against the running stack
+	@cd apps/api && uv run alembic upgrade head
+
+.PHONY: api-shell
+api-shell: ## open an interactive python shell with app context loaded
+	@cd apps/api && uv run python -i -c "from app.main import create_app; app=create_app(); print('app ready')"
+
+.PHONY: api-seed
+api-seed: ## seed a demo org/user (requires EAIP_SEED_DEMO=1)
+	@cd apps/api && EAIP_SEED_DEMO=1 uv run python -m app.scripts.seed
+
 # --- convenience aliases --------------------------------------------------
 
 .PHONY: clean
