@@ -262,3 +262,43 @@ services:
       retries: 10
     mem_limit: 512m
     networks: [eaip-net]
+
+  api:
+    profiles: [app]
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    image: eaip/api:dev
+    container_name: eaip-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # In-container DNS overrides — keep .env values flat for host-side tooling.
+      EAIP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-eaip}:${POSTGRES_PASSWORD:-changeme_local_only}@postgres:5432/${POSTGRES_DB:-eaip}
+      EAIP_REDIS_URL: redis://:${REDIS_PASSWORD:-changeme_local_only}@redis:6379/0
+      EAIP_KAFKA_BOOTSTRAP_SERVERS: redpanda:29092
+      EAIP_OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      EAIP_LOG_LEVEL: ${EAIP_LOG_LEVEL:-INFO}
+      EAIP_ENVIRONMENT: ${EAIP_ENVIRONMENT:-local}
+      EAIP_AUTH_JWT_PRIVATE_KEY_PATH: ${EAIP_AUTH_JWT_PRIVATE_KEY_PATH:-}
+      EAIP_AUTH_JWT_PUBLIC_KEY_PATH: ${EAIP_AUTH_JWT_PUBLIC_KEY_PATH:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      redpanda:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    mem_limit: 512m
+    networks: [eaip-net]
