@@ -126,6 +126,18 @@ class ObservabilitySettings(_Base):
     sample_ratio: float = 1.0
 
 
+
+
+class OpenAISettings(_Base):
+    model_config = SettingsConfigDict(env_prefix="EAIP_OPENAI_", case_sensitive=False, extra="ignore")
+
+    api_key: SecretStr = Field(default=SecretStr(""), description="OpenAI API key.")
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+    request_timeout_seconds: float = 30.0
+    max_retries: int = 3
+
+
 class Settings(_Base):
     """Top-level settings. Composed of nested blocks — each is its own ``BaseSettings``."""
 
@@ -144,6 +156,7 @@ class Settings(_Base):
     rate_limit: RateLimitSettings = Field(default_factory=RateLimitSettings)
     idempotency: IdempotencySettings = Field(default_factory=IdempotencySettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    openai: OpenAISettings = Field(default_factory=OpenAISettings)
 
     @property
     def is_production(self) -> bool:
