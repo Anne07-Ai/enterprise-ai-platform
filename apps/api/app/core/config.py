@@ -138,6 +138,19 @@ class OpenAISettings(_Base):
     max_retries: int = 3
 
 
+
+
+class MinIOSettings(_Base):
+    """MinIO / S3-compatible object storage configuration."""
+
+    model_config = SettingsConfigDict(env_prefix='EAIP_MINIO_', case_sensitive=False, extra='ignore')
+
+    endpoint_url: str = 'http://localhost:9000'
+    access_key: SecretStr = Field(default=SecretStr('minioadmin'))
+    secret_key: SecretStr = Field(default=SecretStr('changeme_local_only'))
+    region: str = 'us-east-1'
+
+
 class Settings(_Base):
     """Top-level settings. Composed of nested blocks — each is its own ``BaseSettings``."""
 
@@ -157,6 +170,7 @@ class Settings(_Base):
     idempotency: IdempotencySettings = Field(default_factory=IdempotencySettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
+    minio: MinIOSettings = Field(default_factory=MinIOSettings)
 
     @property
     def is_production(self) -> bool:
