@@ -32,7 +32,7 @@ def _start_containers() -> dict[str, str]:
     from testcontainers.redis import RedisContainer
 
     pg = PostgresContainer(
-        "postgres:16-alpine", username="eaip", password="eaip", dbname="eaip"
+        "pgvector/pgvector:pg16", username="eaip", password="eaip", dbname="eaip"
     )
     rd = RedisContainer("redis:7-alpine")
     kf = RedpandaContainer("redpandadata/redpanda:latest")
