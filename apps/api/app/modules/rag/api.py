@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from app.core.deps import CurrentPrincipalDep, DBSession
 from app.modules.identity.rbac import require_permission
 from app.modules.rag import service
+from app.modules.rag.events_outbox import emit_document_uploaded
 from app.modules.rag.embeddings import build_default_provider
 from app.modules.rag.schemas import (
     DocumentListOut,
@@ -102,10 +103,9 @@ async def upload_document(
         mime_type=mime,
         data=data,
     )
-
-    # TODO Phase 3.2: emit `event` to the outbox so it lands on Kafka.
-    # For now we log it so the test suite can assert on the side-effect
-    # shape without needing a running worker.
+# Stage the event in the outbox — same transaction as the Document
+    # INSERT. The outbox publisher loop ships it to Kafka.
+    await emit_document_uploaded(db, event)
     logger.info(
         "rag.event.staged",
         extra={
