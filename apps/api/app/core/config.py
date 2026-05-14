@@ -151,6 +151,20 @@ class MinIOSettings(_Base):
     region: str = 'us-east-1'
 
 
+
+
+class AnthropicSettings(_Base):
+    """Anthropic chat model configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="EAIP_ANTHROPIC_", case_sensitive=False, extra="ignore")
+
+    api_key: SecretStr = Field(default=SecretStr(""))
+    model: str = "claude-sonnet-4-6"
+    max_tokens: int = 1024
+    request_timeout_seconds: float = 60.0
+    max_retries: int = 3
+
+
 class Settings(_Base):
     """Top-level settings. Composed of nested blocks — each is its own ``BaseSettings``."""
 
@@ -171,6 +185,7 @@ class Settings(_Base):
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
     minio: MinIOSettings = Field(default_factory=MinIOSettings)
+    anthropic: AnthropicSettings = Field(default_factory=AnthropicSettings)
 
     @property
     def is_production(self) -> bool:
