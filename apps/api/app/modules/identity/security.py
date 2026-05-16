@@ -88,7 +88,7 @@ def _generate_ephemeral_keys() -> tuple[bytes, bytes]:
 def _load_keys(settings: AuthSettings) -> tuple[bytes, bytes]:
     priv_path: Path | None = settings.jwt_private_key_path
     pub_path: Path | None = settings.jwt_public_key_path
-    if priv_path and priv_path.exists() and pub_path and pub_path.exists():
+    if priv_path and priv_path.is_file() and pub_path and pub_path.is_file():
         return priv_path.read_bytes(), pub_path.read_bytes()
     logger.warning(
         "auth.jwt.ephemeral_keys",

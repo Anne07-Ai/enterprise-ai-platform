@@ -38,6 +38,7 @@ OrgRole.OWNER: frozenset(
             "members:read", "members:invite", "members:remove", "members:change_role",
             "api_keys:read", "api_keys:create", "api_keys:revoke",
 "documents:read", "documents:create", "documents:search", "documents:delete",
+            "chat:create",
         }
     ),
     OrgRole.ADMIN: frozenset(
@@ -46,6 +47,7 @@ OrgRole.OWNER: frozenset(
             "members:read", "members:invite", "members:remove", "members:change_role",
             "api_keys:read", "api_keys:create", "api_keys:revoke",
             "documents:read", "documents:create", "documents:search", "documents:delete",
+            "chat:create",
         }
     ),
     OrgRole.MEMBER: frozenset(
@@ -54,6 +56,7 @@ OrgRole.OWNER: frozenset(
             "members:read",
             "api_keys:read",
             "documents:read", "documents:create", "documents:search",
+            "chat:create",
         }
     ),
     OrgRole.VIEWER: frozenset(
@@ -61,6 +64,7 @@ OrgRole.OWNER: frozenset(
             "org:read",
             "members:read",
             "documents:read", "documents:search",
+            "chat:create",
         }
     ),
 }

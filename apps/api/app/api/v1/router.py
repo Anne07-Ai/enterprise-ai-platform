@@ -10,6 +10,7 @@ from app.modules.identity.api import (
     orgs_router,
 )
 from app.modules.rag.api import router as rag_router
+from app.modules.chat.api import router as chat_router
 
 api_router = APIRouter()
 api_router.include_router(healthz_router)
@@ -18,3 +19,4 @@ api_router.include_router(me_router)
 api_router.include_router(orgs_router)
 api_router.include_router(api_keys_router)
 api_router.include_router(rag_router)
+api_router.include_router(chat_router)
