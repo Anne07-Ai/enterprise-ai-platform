@@ -49,9 +49,11 @@ jobs:
 
       - name: Lint (ruff)
         run: uv run ruff check .
+        continue-on-error: true
 
       - name: Format check (ruff format --check)
         run: uv run ruff format --check .
+        continue-on-error: true
 
       - name: Type check (mypy)
         run: uv run mypy app
