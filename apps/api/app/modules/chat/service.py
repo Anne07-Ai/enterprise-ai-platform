@@ -88,3 +88,41 @@ async def handle_chat(
         iterations=result.iterations,
         truncated=result.truncated,
     )
+
+async def handle_chat_stream(
+    session_maker,
+    *,
+    org_id,
+    request: ChatRequest,
+):
+    """Streaming variant of handle_chat.
+
+    Yields :class:`app.modules.chat.sse.Event` instances. The API layer
+    formats them into SSE wire bytes; the service layer never touches
+    the wire format.
+
+    Session policy: one transaction held open across the entire turn,
+    same as the non-streaming version. The session is closed when the
+    generator exits (success, exception, or client disconnect).
+    """
+    from app.modules.chat.agent import run_streaming
+    from app.modules.chat.sse import ErrorEvent, DoneEvent
+
+    history = [{"role": m.role, "content": m.content} for m in request.history]
+
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                async for event in run_streaming(
+                    session,
+                    org_id=org_id,
+                    user_message=request.message,
+                    history=history,
+                ):
+                    yield event
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "chat.stream.failed", extra={"org_id": str(org_id)}
+                )
+                yield ErrorEvent(message=str(exc), code="internal")
+                yield DoneEvent(iterations=0, truncated=False)

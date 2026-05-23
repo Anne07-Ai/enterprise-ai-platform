@@ -93,3 +93,83 @@ async def post_chat(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="upstream LLM error",
         ) from e
+
+# ---------------------------------------------------------------------------
+# Streaming variant
+# ---------------------------------------------------------------------------
+
+
+from fastapi.responses import StreamingResponse  # noqa: E402
+from app.modules.chat.service import handle_chat_stream  # noqa: E402
+from app.modules.chat.sse import (  # noqa: E402
+    DoneEvent,
+    ErrorEvent,
+    format_event,
+    format_heartbeat,
+)
+
+
+@router.post(
+    "/stream",
+    status_code=status.HTTP_200_OK,
+    dependencies=[require_permission("chat:create")],
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE stream of agent events.",
+        }
+    },
+)
+async def post_chat_stream(
+    payload: ChatRequest,
+    principal: CurrentPrincipalDep,
+):
+    """Stream the agent's progress as server-sent events.
+
+    Returns text/event-stream. Events emitted (named):
+        token        — incremental text from the model
+        tool_use     — agent decided to call a tool
+        tool_result  — tool finished (summary only)
+        citations    — full citation list (sent once near the end)
+        done         — terminal marker with iteration count
+        error        — non-recoverable failure (terminal)
+
+    Client should treat `done` or `error` as end-of-stream. Errors that
+    happen BEFORE we open the stream (auth, validation) come back as
+    normal HTTP responses (401/403/422).
+    """
+    if principal.user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API keys cannot use chat",
+        )
+
+    sm = get_sessionmaker()
+
+    async def _gen():
+        # We deliberately do NOT wrap LLM/network errors here. Service
+        # layer yields ErrorEvent + DoneEvent on failure so the client
+        # sees a clean terminal event rather than a torn connection.
+        try:
+            async for event in handle_chat_stream(
+                sm, org_id=principal.org_id, request=payload
+            ):
+                yield format_event(event)
+        except Exception as exc:  # noqa: BLE001
+            # Defense in depth: if service somehow raises instead of
+            # yielding ErrorEvent, emit one ourselves so the client's
+            # EventSource sees a graceful close.
+            logger.exception("chat.stream.handler_failed")
+            yield format_event(ErrorEvent(message=str(exc), code="internal"))
+            yield format_event(DoneEvent(iterations=0, truncated=False))
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            # Disable buffering by intermediaries so events flush immediately.
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )

@@ -194,6 +194,145 @@ async def run(
     )
 
 
+
+async def run_streaming(
+    session,
+    *,
+    org_id,
+    user_message: str,
+    history=None,
+):
+    """Stream the agent's progress as SSE events.
+
+    Yields :class:`app.modules.chat.sse.Event` instances:
+        * TokenEvent — incremental text from the model.
+        * ToolUseEvent — model decided to call a tool.
+        * ToolResultEvent — tool finished (summary only).
+        * CitationsEvent — full citation list at the end.
+        * DoneEvent — terminal marker with iteration count.
+        * ErrorEvent — non-recoverable failure (terminal).
+
+    The control flow mirrors run() but uses Anthropic's streaming API:
+    ``client.messages.stream(...)`` returns a context manager that
+    yields incremental events. We re-stream text_delta blocks as
+    TokenEvents, surface tool_use blocks as ToolUseEvents, run the
+    tool, and continue.
+
+    Unlike run(), no AgentResult is returned — the caller assembles
+    state from the event stream.
+    """
+    from app.modules.chat.sse import (
+        TokenEvent, ToolUseEvent, ToolResultEvent,
+        CitationsEvent, DoneEvent, ErrorEvent,
+    )
+
+    if not user_message or not user_message.strip():
+        yield ErrorEvent(message="empty user message", code="bad_request")
+        yield DoneEvent(iterations=0, truncated=False)
+        return
+
+    settings = get_settings()
+    client = AsyncAnthropic(
+        api_key=settings.anthropic.api_key.get_secret_value(),
+        timeout=settings.anthropic.request_timeout_seconds,
+    )
+
+    messages = list(history or [])
+    messages.append({"role": "user", "content": user_message})
+
+    citations_by_key: dict = {}
+    iterations = 0
+    truncated = False
+
+    try:
+        while iterations < MAX_ITERATIONS:
+            iterations += 1
+            assistant_blocks: list = []
+            stop_reason = None
+
+            async with client.messages.stream(
+                model=settings.anthropic.model,
+                max_tokens=settings.anthropic.max_tokens,
+                system=SYSTEM_PROMPT,
+                tools=TOOL_SCHEMAS,
+                messages=messages,
+            ) as stream:
+                async for event in stream:
+                    etype = event.type
+                    if etype == "content_block_delta":
+                        delta = event.delta
+                        if getattr(delta, "type", None) == "text_delta":
+                            yield TokenEvent(text=delta.text)
+                        # input_json_delta for streaming tool args — we
+                        # surface the full tool_use only when complete.
+
+                # Final message after stream drains.
+                final = await stream.get_final_message()
+                stop_reason = final.stop_reason
+                assistant_blocks = final.content
+
+            # Append assistant turn to history exactly as returned.
+            messages.append({"role": "assistant", "content": assistant_blocks})
+
+            if stop_reason == "end_turn":
+                break
+
+            if stop_reason != "tool_use":
+                # Unusual stop_reason — we already streamed any text;
+                # nothing more to emit, just end the turn.
+                break
+
+            # Process every tool_use block in this turn, in order.
+            tool_results = []
+            for block in assistant_blocks:
+                if getattr(block, "type", None) != "tool_use":
+                    continue
+                yield ToolUseEvent(tool=block.name, input=dict(block.input))
+                result_text, hit_count = await _dispatch_tool_streaming(
+                    session,
+                    org_id=org_id,
+                    tool_name=block.name,
+                    tool_input=block.input,
+                    citations_sink=citations_by_key,
+                )
+                yield ToolResultEvent(
+                    tool=block.name, hit_count=hit_count, ok=True,
+                )
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result_text,
+                })
+
+            messages.append({"role": "user", "content": tool_results})
+
+        else:
+            truncated = True
+
+        yield CitationsEvent(
+            citations=[
+                {
+                    "document_id": c.document_id,
+                    "document_name": c.document_name,
+                    "chunk_index": c.chunk_index,
+                    "score": c.score,
+                }
+                for c in citations_by_key.values()
+            ],
+        )
+        yield DoneEvent(iterations=iterations, truncated=truncated)
+
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("agent.streaming.failed")
+        yield ErrorEvent(message=str(exc), code="internal")
+        yield DoneEvent(iterations=iterations, truncated=truncated)
+    finally:
+        try:
+            await client.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 # --- helpers --------------------------------------------------------------
 
 
@@ -281,3 +420,60 @@ async def _dispatch_tool(
 
     logger.warning("agent.unknown_tool", extra={"tool": tool_name})
     return f"Unknown tool: {tool_name}"
+
+async def _dispatch_tool_streaming(
+    session,
+    *,
+    org_id,
+    tool_name: str,
+    tool_input: dict,
+    citations_sink: dict,
+) -> tuple[str, int | None]:
+    """Streaming variant of _dispatch_tool that returns (result_text, hit_count).
+
+    The hit_count is exposed in ToolResultEvent for UI feedback
+    ("found 3 documents") without leaking the full payload to the wire.
+    """
+    if tool_name == "search_documents":
+        hits = await search_documents(
+            session,
+            org_id=org_id,
+            query=tool_input.get("query", ""),
+            limit=int(tool_input.get("limit", 5)),
+        )
+        for h in hits:
+            key = (h.document_id, h.chunk_index)
+            if key not in citations_sink:
+                citations_sink[key] = Citation(
+                    document_id=h.document_id,
+                    document_name=h.document_name,
+                    chunk_index=h.chunk_index,
+                    score=h.score,
+                )
+        if not hits:
+            return "No matching chunks found.", 0
+        lines = []
+        for h in hits:
+            lines.append(
+                f"[{h.document_name} #{h.chunk_index}] (score={h.score:.3f})\n{h.text}"
+            )
+        return "\n\n---\n\n".join(lines), len(hits)
+
+    if tool_name == "get_document":
+        info = await get_document(
+            session,
+            org_id=org_id,
+            document_id=tool_input.get("document_id", ""),
+        )
+        if info is None:
+            return "Document not found.", None
+        return (
+            f"document_id={info.document_id}\n"
+            f"name={info.name}\n"
+            f"mime_type={info.mime_type}\n"
+            f"status={info.status}\n"
+            f"chunk_count={info.chunk_count}\n"
+            f"byte_size={info.byte_size}"
+        ), None
+
+    return f"Unknown tool: {tool_name}", None
