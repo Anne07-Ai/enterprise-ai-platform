@@ -1,5 +1,9 @@
 # Enterprise AI Workflow Platform
 
+[![CI](https://github.com/Anne07-Ai/enterprise-ai-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Anne07-Ai/enterprise-ai-platform/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+
 > Production reference architecture for multi-tenant RAG with tool-using agents.
 > FastAPI · Postgres RLS · Kafka workers · Anthropic · OpenAI · pgvector.
 
