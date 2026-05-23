@@ -36,12 +36,12 @@ async def dispose_redis() -> None:
         try:
             await _client.aclose()
             logger.info("redis.client.disposed")
-        except (RuntimeError, Exception) as e:  # noqa: BLE001
+        except (RuntimeError, Exception) as e:
             logger.debug("redis.client.dispose_suppressed", error=str(e))
     if _pool is not None:
         try:
             await _pool.disconnect(inuse_connections=True)
-        except (RuntimeError, Exception) as e:  # noqa: BLE001
+        except (RuntimeError, Exception) as e:
             logger.debug("redis.pool.dispose_suppressed", error=str(e))
     _client = None
     _pool = None

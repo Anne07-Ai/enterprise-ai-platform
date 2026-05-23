@@ -76,14 +76,13 @@ async def _publish_batch(batch_size: int = 100) -> int:
     """Publish up to ``batch_size`` outbox rows. Returns the number published."""
     sm = get_sessionmaker()
     published = 0
-    async with sm() as session:
-        async with session.begin():
-            # SELECT FOR UPDATE SKIP LOCKED is the canonical worker pattern: many
-            # publishers can run concurrently without stepping on each other.
-            rows = (
-                await session.execute(
-                    text(
-                        """
+    async with sm() as session, session.begin():
+        # SELECT FOR UPDATE SKIP LOCKED is the canonical worker pattern: many
+        # publishers can run concurrently without stepping on each other.
+        rows = (
+            await session.execute(
+                text(
+                    """
                         SELECT id, topic, key, payload, headers
                           FROM outbox
                          WHERE published_at IS NULL
@@ -91,29 +90,29 @@ async def _publish_batch(batch_size: int = 100) -> int:
                          LIMIT :n
                            FOR UPDATE SKIP LOCKED
                         """
-                    ),
-                    {"n": batch_size},
-                )
-            ).all()
+                ),
+                {"n": batch_size},
+            )
+        ).all()
 
-            for row in rows:
-                payload = row.payload if isinstance(row.payload, dict) else dict(row.payload)
-                try:
-                    await kafka_infra.send(row.topic, payload, key=row.key)
-                except Exception as exc:  # pragma: no cover — broker hiccup, retry next tick
-                    logger.warning(
-                        "outbox.publish.failed",
-                        topic=row.topic,
-                        outbox_id=str(row.id),
-                        error=str(exc),
-                    )
-                    continue
-
-                await session.execute(
-                    text("UPDATE outbox SET published_at = now() WHERE id = :id"),
-                    {"id": row.id},
+        for row in rows:
+            payload = row.payload if isinstance(row.payload, dict) else dict(row.payload)
+            try:
+                await kafka_infra.send(row.topic, payload, key=row.key)
+            except Exception as exc:  # pragma: no cover — broker hiccup, retry next tick
+                logger.warning(
+                    "outbox.publish.failed",
+                    topic=row.topic,
+                    outbox_id=str(row.id),
+                    error=str(exc),
                 )
-                published += 1
+                continue
+
+            await session.execute(
+                text("UPDATE outbox SET published_at = now() WHERE id = :id"),
+                {"id": row.id},
+            )
+            published += 1
     if published:
         logger.info("outbox.publish.batch", count=published)
     return published

@@ -17,6 +17,7 @@ Token counts use the GPT-4 / text-embedding-3 tokenizer (cl100k_base).
 That's a close-enough approximation for any modern model; off by a few
 percent at worst.
 """
+
 from __future__ import annotations
 
 import re
@@ -85,9 +86,7 @@ def chunk_text(
         else:
             full = body_text
         token_ids = _ENCODER.encode(full)
-        chunks.append(
-            Chunk(index=len(chunks), text=full, token_count=len(token_ids))
-        )
+        chunks.append(Chunk(index=len(chunks), text=full, token_count=len(token_ids)))
         # Compute overlap tail for the NEXT chunk from this chunk's tokens.
         if overlap_tokens > 0 and len(token_ids) > overlap_tokens:
             overlap_tail = token_ids[-overlap_tokens:]

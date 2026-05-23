@@ -13,6 +13,7 @@ Status codes:
     502 — upstream Anthropic API error (rate limit, auth, transient)
     500 — anything else (DB, internal bug)
 """
+
 from __future__ import annotations
 
 import logging
@@ -63,9 +64,7 @@ async def post_chat(
     sm = get_sessionmaker()
 
     try:
-        return await handle_chat(
-            sm, org_id=principal.org_id, request=payload
-        )
+        return await handle_chat(sm, org_id=principal.org_id, request=payload)
     except anthropic.APIStatusError as e:
         # Anthropic returned a non-2xx (401, 429, 500, etc.) — surface
         # it to the client as a 502 since the failure is upstream.
@@ -94,18 +93,19 @@ async def post_chat(
             detail="upstream LLM error",
         ) from e
 
+
 # ---------------------------------------------------------------------------
 # Streaming variant
 # ---------------------------------------------------------------------------
 
 
 from fastapi.responses import StreamingResponse  # noqa: E402
+
 from app.modules.chat.service import handle_chat_stream  # noqa: E402
 from app.modules.chat.sse import (  # noqa: E402
     DoneEvent,
     ErrorEvent,
     format_event,
-    format_heartbeat,
 )
 
 
@@ -151,11 +151,9 @@ async def post_chat_stream(
         # layer yields ErrorEvent + DoneEvent on failure so the client
         # sees a clean terminal event rather than a torn connection.
         try:
-            async for event in handle_chat_stream(
-                sm, org_id=principal.org_id, request=payload
-            ):
+            async for event in handle_chat_stream(sm, org_id=principal.org_id, request=payload):
                 yield format_event(event)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # Defense in depth: if service somehow raises instead of
             # yielding ErrorEvent, emit one ourselves so the client's
             # EventSource sees a graceful close.

@@ -99,7 +99,7 @@ async def dispose_engine() -> None:
         try:
             await _engine.dispose()
             logger.info("db.engine.disposed")
-        except (RuntimeError, Exception) as e:  # noqa: BLE001
+        except (RuntimeError, Exception) as e:
             logger.debug("db.engine.dispose_suppressed", error=str(e))
     _engine = None
     _sessionmaker = None
@@ -118,14 +118,13 @@ async def session_for_request(*, org_id: UUID | None) -> AsyncIterator[AsyncSess
     which returns NULL when unset, and the policies fail closed (see migration).
     """
     sm = get_sessionmaker()
-    async with sm() as session:
-        async with session.begin():
-            if org_id is not None:
-                await session.execute(
-                    text("SELECT set_config('app.current_org', :org, true)"),
-                    {"org": str(org_id)},
-                )
-            yield session
+    async with sm() as session, session.begin():
+        if org_id is not None:
+            await session.execute(
+                text("SELECT set_config('app.current_org', :org, true)"),
+                {"org": str(org_id)},
+            )
+        yield session
 
 
 async def session_unscoped() -> AsyncIterator[AsyncSession]:
@@ -140,12 +139,9 @@ async def session_unscoped() -> AsyncIterator[AsyncSession]:
     The bypass is scoped to the transaction and rolls back on commit/abort.
     """
     sm = get_sessionmaker()
-    async with sm() as session:
-        async with session.begin():
-            await session.execute(
-                text("SELECT set_config('app.bypass_rls', 'on', true)")
-            )
-            yield session
+    async with sm() as session, session.begin():
+        await session.execute(text("SELECT set_config('app.bypass_rls', 'on', true)"))
+        yield session
 
 
 # --- ping helpers used by /readyz ----------------------------------------
@@ -159,11 +155,11 @@ async def ping() -> None:
 
 __all__ = [
     "Base",
+    "Engine",
+    "dispose_engine",
     "get_engine",
     "get_sessionmaker",
-    "dispose_engine",
+    "ping",
     "session_for_request",
     "session_unscoped",
-    "ping",
-    "Engine",
 ]

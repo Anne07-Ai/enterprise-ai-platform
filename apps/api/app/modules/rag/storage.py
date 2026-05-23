@@ -14,10 +14,10 @@ This module trusts the caller.
 The client is created lazily and reused. Tests pass an explicit
 client to avoid coupling to global state.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import AsyncIterator
 from uuid import UUID
 
 import aioboto3
@@ -79,9 +79,7 @@ class DocumentStorage:
         """Return the s3:// URI for storage in the database."""
         return f"s3://{self.DOCUMENTS_BUCKET}/{key}"
 
-    async def put(
-        self, *, key: str, data: bytes, content_type: str
-    ) -> None:
+    async def put(self, *, key: str, data: bytes, content_type: str) -> None:
         async with self._client_ctx() as client:
             try:
                 await client.put_object(
@@ -90,7 +88,7 @@ class DocumentStorage:
                     Body=data,
                     ContentType=content_type,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.error(
                     "storage.put_failed",
                     extra={"key": key, "error": str(exc)},
@@ -100,12 +98,10 @@ class DocumentStorage:
     async def get(self, *, key: str) -> bytes:
         async with self._client_ctx() as client:
             try:
-                resp = await client.get_object(
-                    Bucket=self.DOCUMENTS_BUCKET, Key=key
-                )
+                resp = await client.get_object(Bucket=self.DOCUMENTS_BUCKET, Key=key)
                 async with resp["Body"] as stream:
                     return await stream.read()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.error(
                     "storage.get_failed",
                     extra={"key": key, "error": str(exc)},
@@ -115,10 +111,8 @@ class DocumentStorage:
     async def delete(self, *, key: str) -> None:
         async with self._client_ctx() as client:
             try:
-                await client.delete_object(
-                    Bucket=self.DOCUMENTS_BUCKET, Key=key
-                )
-            except Exception as exc:  # noqa: BLE001
+                await client.delete_object(Bucket=self.DOCUMENTS_BUCKET, Key=key)
+            except Exception as exc:
                 logger.error(
                     "storage.delete_failed",
                     extra={"key": key, "error": str(exc)},

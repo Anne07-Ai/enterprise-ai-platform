@@ -155,7 +155,11 @@ async def domain_error_handler(request: Request, exc: DomainError) -> JSONRespon
 
 
 async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-    title = HTTPStatus(exc.status_code).phrase if exc.status_code in HTTPStatus._value2member_map_ else "HTTP error"
+    title = (
+        HTTPStatus(exc.status_code).phrase
+        if exc.status_code in HTTPStatus._value2member_map_
+        else "HTTP error"
+    )
     return _problem_response(
         request=request,
         status_code=exc.status_code,

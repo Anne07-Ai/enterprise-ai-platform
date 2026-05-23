@@ -26,6 +26,7 @@ Graceful shutdown:
     SIGTERM / SIGINT triggers _stop_event. The loop finishes the
     current batch, commits its offsets, and exits cleanly.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -56,11 +57,8 @@ async def _process_one(record_value: dict[str, Any]) -> None:
     """Handle one event in its own DB transaction."""
     storage = get_storage()
     sm = get_sessionmaker()
-    async with sm() as session:
-        async with session.begin():
-            await handle_document_uploaded(
-                session, storage, event_payload=record_value
-            )
+    async with sm() as session, session.begin():
+        await handle_document_uploaded(session, storage, event_payload=record_value)
 
 
 async def run(stop_event: asyncio.Event) -> None:
@@ -99,7 +97,7 @@ async def run(stop_event: asyncio.Event) -> None:
                     consumer.getmany(timeout_ms=1000, max_records=10),
                     timeout=2.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
             if not batch:
@@ -120,7 +118,7 @@ async def run(stop_event: asyncio.Event) -> None:
                     )
                     try:
                         await _process_one(record.value)
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         logger.exception(
                             "ingestion.message.unhandled",
                             extra={"document_id": document_id, "offset": record.offset},
@@ -142,7 +140,7 @@ async def run(stop_event: asyncio.Event) -> None:
         logger.info("ingestion.stopping")
         try:
             await consumer.stop()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("ingestion.consumer.stop_failed")
         await outbox_infra.stop_publisher()
         await kafka_infra.dispose_producer()
@@ -160,7 +158,7 @@ async def amain() -> int:
     _install_signal_handlers(asyncio.get_running_loop(), stop_event)
     try:
         await run(stop_event)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("ingestion.fatal")
         return 1
     return 0

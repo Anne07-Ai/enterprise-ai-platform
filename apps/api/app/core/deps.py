@@ -17,14 +17,13 @@ from app.core.config import Settings, get_settings
 from app.core.errors import AuthenticationError, AuthorizationError
 from app.infra.db import session_for_request, session_unscoped
 
-
 # --- principals ----------------------------------------------------------
 
 
 class CurrentPrincipal:
     """Carries the authenticated principal for a request (user or API key)."""
 
-    __slots__ = ("user_id", "org_id", "role", "scopes", "kind", "jti")
+    __slots__ = ("jti", "kind", "org_id", "role", "scopes", "user_id")
 
     def __init__(
         self,

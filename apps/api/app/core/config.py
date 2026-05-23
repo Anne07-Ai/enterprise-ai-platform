@@ -39,7 +39,9 @@ class _Base(BaseSettings):
 
 
 class DatabaseSettings(_Base):
-    model_config = SettingsConfigDict(env_prefix="EAIP_DATABASE_", case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="EAIP_DATABASE_", case_sensitive=False, extra="ignore"
+    )
 
     url: SecretStr = Field(
         default=SecretStr("postgresql+asyncpg://eaip:changeme_local_only@localhost:5432/eaip"),
@@ -56,12 +58,16 @@ class DatabaseSettings(_Base):
     @classmethod
     def _must_be_async(cls, v: SecretStr) -> SecretStr:
         if "+asyncpg" not in v.get_secret_value():
-            raise ValueError("EAIP_DATABASE_URL must use the asyncpg driver (postgresql+asyncpg://...)")
+            raise ValueError(
+                "EAIP_DATABASE_URL must use the asyncpg driver (postgresql+asyncpg://...)"
+            )
         return v
 
 
 class RedisSettings(_Base):
-    model_config = SettingsConfigDict(env_prefix="EAIP_REDIS_", case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="EAIP_REDIS_", case_sensitive=False, extra="ignore"
+    )
 
     url: SecretStr = Field(default=SecretStr("redis://localhost:6379/0"))
     pool_max_connections: int = 50
@@ -69,7 +75,9 @@ class RedisSettings(_Base):
 
 
 class KafkaSettings(_Base):
-    model_config = SettingsConfigDict(env_prefix="EAIP_KAFKA_", case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="EAIP_KAFKA_", case_sensitive=False, extra="ignore"
+    )
 
     bootstrap_servers: str = "localhost:9092"
     client_id: str = "eaip-api"
@@ -86,7 +94,7 @@ class AuthSettings(_Base):
     jwt_audience: str = "eaip-api"
     jwt_private_key_path: Path | None = None
     jwt_public_key_path: Path | None = None
-    access_token_ttl_seconds: int = 60 * 15        # 15 minutes
+    access_token_ttl_seconds: int = 60 * 15  # 15 minutes
     refresh_token_ttl_seconds: int = 60 * 60 * 24 * 7  # 7 days
     api_key_prefix_live: str = "eaip_live_"
     api_key_prefix_test: str = "eaip_test_"
@@ -98,7 +106,9 @@ class AuthSettings(_Base):
 
 
 class RateLimitSettings(_Base):
-    model_config = SettingsConfigDict(env_prefix="EAIP_RATELIMIT_", case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="EAIP_RATELIMIT_", case_sensitive=False, extra="ignore"
+    )
 
     enabled: bool = True
     per_org_rps: int = 100
@@ -109,7 +119,9 @@ class RateLimitSettings(_Base):
 
 
 class IdempotencySettings(_Base):
-    model_config = SettingsConfigDict(env_prefix="EAIP_IDEMPOTENCY_", case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="EAIP_IDEMPOTENCY_", case_sensitive=False, extra="ignore"
+    )
 
     enabled: bool = True
     ttl_seconds: int = 60 * 60 * 24
@@ -126,10 +138,10 @@ class ObservabilitySettings(_Base):
     sample_ratio: float = 1.0
 
 
-
-
 class OpenAISettings(_Base):
-    model_config = SettingsConfigDict(env_prefix="EAIP_OPENAI_", case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="EAIP_OPENAI_", case_sensitive=False, extra="ignore"
+    )
 
     api_key: SecretStr = Field(default=SecretStr(""), description="OpenAI API key.")
     embedding_model: str = "text-embedding-3-small"
@@ -138,25 +150,25 @@ class OpenAISettings(_Base):
     max_retries: int = 3
 
 
-
-
 class MinIOSettings(_Base):
     """MinIO / S3-compatible object storage configuration."""
 
-    model_config = SettingsConfigDict(env_prefix='EAIP_MINIO_', case_sensitive=False, extra='ignore')
+    model_config = SettingsConfigDict(
+        env_prefix="EAIP_MINIO_", case_sensitive=False, extra="ignore"
+    )
 
-    endpoint_url: str = 'http://localhost:9000'
-    access_key: SecretStr = Field(default=SecretStr('minioadmin'))
-    secret_key: SecretStr = Field(default=SecretStr('changeme_local_only'))
-    region: str = 'us-east-1'
-
-
+    endpoint_url: str = "http://localhost:9000"
+    access_key: SecretStr = Field(default=SecretStr("minioadmin"))
+    secret_key: SecretStr = Field(default=SecretStr("changeme_local_only"))
+    region: str = "us-east-1"
 
 
 class AnthropicSettings(_Base):
     """Anthropic chat model configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="EAIP_ANTHROPIC_", case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="EAIP_ANTHROPIC_", case_sensitive=False, extra="ignore"
+    )
 
     api_key: SecretStr = Field(default=SecretStr(""))
     model: str = "claude-sonnet-4-6"

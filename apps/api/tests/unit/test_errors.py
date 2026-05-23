@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import pytest
-
 from app.core.errors import (
+    PROBLEM_BASE,
     AuthenticationError,
     AuthorizationError,
     ConflictError,
     NotFoundError,
-    PROBLEM_BASE,
     ProblemDetails,
     RateLimitedError,
 )

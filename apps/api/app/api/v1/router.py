@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.healthz import router as healthz_router
+from app.modules.chat.api import router as chat_router
 from app.modules.identity.api import (
     api_keys_router,
     auth_router,
@@ -10,7 +11,6 @@ from app.modules.identity.api import (
     orgs_router,
 )
 from app.modules.rag.api import router as rag_router
-from app.modules.chat.api import router as chat_router
 
 api_router = APIRouter()
 api_router.include_router(healthz_router)

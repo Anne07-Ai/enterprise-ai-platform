@@ -15,11 +15,13 @@ Performance notes:
 * Each request is retried up to ``max_retries`` times with exponential
   backoff. 429 (rate limit) and 5xx are retryable; 4xx is not.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Protocol, Sequence
+from collections.abc import Sequence
+from typing import Protocol
 
 import httpx
 from pydantic import SecretStr
@@ -106,7 +108,7 @@ class OpenAIEmbeddingProvider:
         if self._client is not None:
             try:
                 await self._client.aclose()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             self._client = None
 
@@ -146,9 +148,7 @@ class OpenAIEmbeddingProvider:
 
                 # Retryable: rate limit or server error.
                 if resp.status_code == 429 or resp.status_code >= 500:
-                    last_exc = EmbeddingError(
-                        f"OpenAI {resp.status_code}: {resp.text[:200]}"
-                    )
+                    last_exc = EmbeddingError(f"OpenAI {resp.status_code}: {resp.text[:200]}")
                     logger.warning(
                         "openai.embeddings.retryable_error",
                         extra={
@@ -158,9 +158,7 @@ class OpenAIEmbeddingProvider:
                     )
                 else:
                     # Non-retryable client error (bad model, bad key, etc.)
-                    raise EmbeddingError(
-                        f"OpenAI {resp.status_code}: {resp.text[:500]}"
-                    )
+                    raise EmbeddingError(f"OpenAI {resp.status_code}: {resp.text[:500]}")
 
             if attempt < self._max_retries:
                 # Exponential backoff: 0.5s, 1s, 2s.

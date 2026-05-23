@@ -69,7 +69,9 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 blob = None
             if blob and blob.get("fingerprint") == fingerprint:
                 return Response(
-                    content=blob["body"].encode() if isinstance(blob["body"], str) else blob["body"],
+                    content=blob["body"].encode()
+                    if isinstance(blob["body"], str)
+                    else blob["body"],
                     status_code=blob["status"],
                     headers={**blob.get("headers", {}), "Idempotent-Replay": "true"},
                     media_type=blob.get("media_type", "application/json"),
@@ -94,7 +96,9 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 if blob is not None:
                     parsed = json.loads(blob)
                     return Response(
-                        content=parsed["body"].encode() if isinstance(parsed["body"], str) else parsed["body"],
+                        content=parsed["body"].encode()
+                        if isinstance(parsed["body"], str)
+                        else parsed["body"],
                         status_code=parsed["status"],
                         headers={**parsed.get("headers", {}), "Idempotent-Replay": "true"},
                         media_type=parsed.get("media_type", "application/json"),
@@ -117,7 +121,8 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                     "status": response.status_code,
                     "body": response_body.decode("utf-8", errors="replace"),
                     "headers": {
-                        k: v for k, v in response.headers.items()
+                        k: v
+                        for k, v in response.headers.items()
                         if k.lower() not in {"content-length"}
                     },
                     "media_type": response.media_type,

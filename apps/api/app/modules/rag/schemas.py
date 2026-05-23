@@ -4,6 +4,7 @@ Mirrors the patterns in app.modules.identity.schemas: separate Out
 models for API responses (so we never accidentally leak internal
 columns), and tight Create/Update models for inputs.
 """
+
 from __future__ import annotations
 
 import uuid

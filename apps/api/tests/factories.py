@@ -22,4 +22,4 @@ class OrgKwargsFactory(factory.DictFactory):
 class UserKwargsFactory(factory.DictFactory):
     email = factory.LazyAttribute(lambda _: fake.unique.email())
     display_name = factory.LazyAttribute(lambda _: fake.name())
-    password = "test-password-1234"  # noqa: S105
+    password = "test-password-1234"

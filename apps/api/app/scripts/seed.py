@@ -41,42 +41,41 @@ async def _seed() -> None:
         sys.exit(2)
 
     sm = get_sessionmaker()
-    async with sm() as session:
-        async with session.begin():
-            # Bypass RLS for the seed — we are creating the very first
-            # org/user pair in an empty database.
-            await session.execute(text("SELECT set_config('app.bypass_rls', 'on', true)"))
-            user = (
-                await session.execute(select(User).where(User.email == DEMO_EMAIL))
-            ).scalar_one_or_none()
-            if user is None:
-                user = User(
-                    email=DEMO_EMAIL,
-                    display_name="Demo User",
-                    password_hash=hash_password(DEMO_PASSWORD),
-                )
-                session.add(user)
-                await session.flush()
-                logger.info("seed.user.created", user_id=str(user.id))
+    async with sm() as session, session.begin():
+        # Bypass RLS for the seed — we are creating the very first
+        # org/user pair in an empty database.
+        await session.execute(text("SELECT set_config('app.bypass_rls', 'on', true)"))
+        user = (
+            await session.execute(select(User).where(User.email == DEMO_EMAIL))
+        ).scalar_one_or_none()
+        if user is None:
+            user = User(
+                email=DEMO_EMAIL,
+                display_name="Demo User",
+                password_hash=hash_password(DEMO_PASSWORD),
+            )
+            session.add(user)
+            await session.flush()
+            logger.info("seed.user.created", user_id=str(user.id))
 
-            org = (
-                await session.execute(
-                    select(Organization).where(Organization.slug == DEMO_ORG_SLUG)
-                )
-            ).scalar_one_or_none()
-            if org is None:
-                org = await identity_service.create_org(
-                    session,
-                    slug=DEMO_ORG_SLUG,
-                    name="Demo Organization",
-                    creator_user_id=user.id,
-                    is_test=True,
-                )
-                logger.info("seed.org.created", org_id=str(org.id))
-            else:
-                logger.info("seed.org.exists", org_id=str(org.id))
+        org = (
+            await session.execute(select(Organization).where(Organization.slug == DEMO_ORG_SLUG))
+        ).scalar_one_or_none()
+        if org is None:
+            org = await identity_service.create_org(
+                session,
+                slug=DEMO_ORG_SLUG,
+                name="Demo Organization",
+                creator_user_id=user.id,
+                is_test=True,
+            )
+            logger.info("seed.org.created", org_id=str(org.id))
+        else:
+            logger.info("seed.org.exists", org_id=str(org.id))
 
-    print(f"\nDemo credentials:\n  email:    {DEMO_EMAIL}\n  password: {DEMO_PASSWORD}\n  org slug: {DEMO_ORG_SLUG}\n")
+    print(
+        f"\nDemo credentials:\n  email:    {DEMO_EMAIL}\n  password: {DEMO_PASSWORD}\n  org slug: {DEMO_ORG_SLUG}\n"
+    )
 
 
 if __name__ == "__main__":

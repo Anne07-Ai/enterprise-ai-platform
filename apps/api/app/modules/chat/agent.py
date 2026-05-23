@@ -24,6 +24,7 @@ What this is NOT:
       sometimes emits multiple tool_use blocks per turn; we process them
       in order.
 """
+
 from __future__ import annotations
 
 import logging
@@ -148,9 +149,7 @@ async def run(
             if resp.stop_reason != "tool_use":
                 # Unusual stop_reason (max_tokens, refusal, etc.) —
                 # take what text we have and stop.
-                final_text = _extract_text(resp.content) or (
-                    f"(agent stopped: {resp.stop_reason})"
-                )
+                final_text = _extract_text(resp.content) or (f"(agent stopped: {resp.stop_reason})")
                 break
 
             # Process every tool_use block in this turn, in order.
@@ -165,25 +164,26 @@ async def run(
                     tool_input=block.input,
                     citations_sink=citations_by_key,
                 )
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result_text,
-                })
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result_text,
+                    }
+                )
 
             messages.append({"role": "user", "content": tool_results})
 
         else:
             truncated = True
             final_text = (
-                final_text
-                or "I ran out of reasoning steps before reaching a final answer."
+                final_text or "I ran out of reasoning steps before reaching a final answer."
             )
     finally:
         # AsyncAnthropic uses an underlying httpx client — close it.
         try:
             await client.close()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     return AgentResult(
@@ -192,7 +192,6 @@ async def run(
         iterations=iterations,
         truncated=truncated,
     )
-
 
 
 async def run_streaming(
@@ -222,8 +221,12 @@ async def run_streaming(
     state from the event stream.
     """
     from app.modules.chat.sse import (
-        TokenEvent, ToolUseEvent, ToolResultEvent,
-        CitationsEvent, DoneEvent, ErrorEvent,
+        CitationsEvent,
+        DoneEvent,
+        ErrorEvent,
+        TokenEvent,
+        ToolResultEvent,
+        ToolUseEvent,
     )
 
     if not user_message or not user_message.strip():
@@ -296,13 +299,17 @@ async def run_streaming(
                     citations_sink=citations_by_key,
                 )
                 yield ToolResultEvent(
-                    tool=block.name, hit_count=hit_count, ok=True,
+                    tool=block.name,
+                    hit_count=hit_count,
+                    ok=True,
                 )
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result_text,
-                })
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result_text,
+                    }
+                )
 
             messages.append({"role": "user", "content": tool_results})
 
@@ -322,14 +329,14 @@ async def run_streaming(
         )
         yield DoneEvent(iterations=iterations, truncated=truncated)
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("agent.streaming.failed")
         yield ErrorEvent(message=str(exc), code="internal")
         yield DoneEvent(iterations=iterations, truncated=truncated)
     finally:
         try:
             await client.close()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
 
@@ -396,9 +403,7 @@ async def _dispatch_tool(
             return "No matching chunks found."
         lines = []
         for h in hits:
-            lines.append(
-                f"[{h.document_name} #{h.chunk_index}] (score={h.score:.3f})\n{h.text}"
-            )
+            lines.append(f"[{h.document_name} #{h.chunk_index}] (score={h.score:.3f})\n{h.text}")
         return "\n\n---\n\n".join(lines)
 
     if tool_name == "get_document":
@@ -420,6 +425,7 @@ async def _dispatch_tool(
 
     logger.warning("agent.unknown_tool", extra={"tool": tool_name})
     return f"Unknown tool: {tool_name}"
+
 
 async def _dispatch_tool_streaming(
     session,
@@ -454,9 +460,7 @@ async def _dispatch_tool_streaming(
             return "No matching chunks found.", 0
         lines = []
         for h in hits:
-            lines.append(
-                f"[{h.document_name} #{h.chunk_index}] (score={h.score:.3f})\n{h.text}"
-            )
+            lines.append(f"[{h.document_name} #{h.chunk_index}] (score={h.score:.3f})\n{h.text}")
         return "\n\n---\n\n".join(lines), len(hits)
 
     if tool_name == "get_document":

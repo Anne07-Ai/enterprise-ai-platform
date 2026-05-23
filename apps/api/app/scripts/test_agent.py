@@ -12,6 +12,7 @@ Run:
     Terminal B: uv run python -m app.workers.embedding
     Terminal C: uv run python app/scripts/test_agent.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,17 +23,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from sqlalchemy import text  # noqa: E402
+from sqlalchemy import text
 
-from app.infra.db import get_sessionmaker  # noqa: E402
-from app.modules.chat.agent import run as agent_run  # noqa: E402
-from app.modules.identity.models import Membership, Organization, User  # noqa: E402
-from app.modules.identity.security import hash_password  # noqa: E402
-from app.modules.rag import service as rag_service  # noqa: E402
-from app.modules.rag.events_outbox import emit_document_uploaded  # noqa: E402
-from app.modules.rag.models import DocumentStatus  # noqa: E402
-from app.modules.rag.storage import get_storage  # noqa: E402
-
+from app.infra.db import get_sessionmaker
+from app.modules.chat.agent import run as agent_run
+from app.modules.identity.models import Membership, Organization, User
+from app.modules.identity.security import hash_password
+from app.modules.rag import service as rag_service
+from app.modules.rag.events_outbox import emit_document_uploaded
+from app.modules.rag.models import DocumentStatus
+from app.modules.rag.storage import get_storage
 
 SAMPLE_DOCUMENT = textwrap.dedent("""\
     # Engineering Handbook
@@ -81,40 +81,40 @@ QUESTIONS = [
 async def _seed() -> tuple[uuid.UUID, uuid.UUID]:
     sm = get_sessionmaker()
     suffix = uuid.uuid4().hex[:8]
-    async with sm() as session:
-        async with session.begin():
-            await session.execute(text("SELECT set_config('app.bypass_rls', 'on', true)"))
-            user = User(
-                email=f"agent-test-{suffix}@example.com",
-                display_name=f"agent-test-{suffix}",
-                password_hash=hash_password("not-real-test-pw"),
-            )
-            org = Organization(slug=f"agent-test-{suffix}", name=f"Agent Test {suffix}", is_test=True)
-            session.add_all([user, org])
-            await session.flush()
-            session.add(Membership(org_id=org.id, user_id=user.id, role="owner"))
-            await session.flush()
-            return org.id, user.id
+    async with sm() as session, session.begin():
+        await session.execute(text("SELECT set_config('app.bypass_rls', 'on', true)"))
+        user = User(
+            email=f"agent-test-{suffix}@example.com",
+            display_name=f"agent-test-{suffix}",
+            password_hash=hash_password("not-real-test-pw"),
+        )
+        org = Organization(slug=f"agent-test-{suffix}", name=f"Agent Test {suffix}", is_test=True)
+        session.add_all([user, org])
+        await session.flush()
+        session.add(Membership(org_id=org.id, user_id=user.id, role="owner"))
+        await session.flush()
+        return org.id, user.id
 
 
 async def _upload(org_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID:
     sm = get_sessionmaker()
     storage = get_storage()
-    async with sm() as session:
-        async with session.begin():
-            await session.execute(
-                text("SELECT set_config('app.current_org', :org, true)"),
-                {"org": str(org_id)},
-            )
-            doc, event = await rag_service.create_document(
-                session, storage,
-                org_id=org_id, created_by=user_id,
-                name="engineering-handbook.md",
-                mime_type="text/markdown",
-                data=SAMPLE_DOCUMENT,
-            )
-            await emit_document_uploaded(session, event)
-            return doc.id
+    async with sm() as session, session.begin():
+        await session.execute(
+            text("SELECT set_config('app.current_org', :org, true)"),
+            {"org": str(org_id)},
+        )
+        doc, event = await rag_service.create_document(
+            session,
+            storage,
+            org_id=org_id,
+            created_by=user_id,
+            name="engineering-handbook.md",
+            mime_type="text/markdown",
+            data=SAMPLE_DOCUMENT,
+        )
+        await emit_document_uploaded(session, event)
+        return doc.id
 
 
 async def _wait_ready(org_id: uuid.UUID, doc_id: uuid.UUID, timeout: float = 60.0) -> None:
@@ -124,13 +124,12 @@ async def _wait_ready(org_id: uuid.UUID, doc_id: uuid.UUID, timeout: float = 60.
     while True:
         if asyncio.get_event_loop().time() > deadline:
             raise TimeoutError(f"document {doc_id} never reached ready (last={last})")
-        async with sm() as session:
-            async with session.begin():
-                await session.execute(
-                    text("SELECT set_config('app.current_org', :org, true)"),
-                    {"org": str(org_id)},
-                )
-                doc = await rag_service.get_document(session, document_id=doc_id)
+        async with sm() as session, session.begin():
+            await session.execute(
+                text("SELECT set_config('app.current_org', :org, true)"),
+                {"org": str(org_id)},
+            )
+            doc = await rag_service.get_document(session, document_id=doc_id)
         if doc is None:
             raise RuntimeError("document disappeared")
         if doc.status != last:
@@ -165,11 +164,12 @@ async def main() -> int:
     for i, q in enumerate(QUESTIONS, 1):
         print(f"\n    --- Question {i} ---")
         print(f"    Q: {q}")
-        async with sm() as session:
-            async with session.begin():
-                result = await agent_run(
-                    session, org_id=org_id, user_message=q,
-                )
+        async with sm() as session, session.begin():
+            result = await agent_run(
+                session,
+                org_id=org_id,
+                user_message=q,
+            )
         print(f"    iterations: {result.iterations}, truncated: {result.truncated}")
         print(f"    citations: {len(result.citations)}")
         for c in result.citations:

@@ -6,15 +6,14 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import pool
-from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
-
 from app.core.config import get_settings
 from app.infra.db import Base
 
 # Import models so target_metadata is fully populated for autogenerate.
 from app.modules.identity import models  # noqa: F401  (registers ORM mappers)
+from sqlalchemy import pool
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import async_engine_from_config
 
 config = context.config
 
@@ -27,7 +26,9 @@ config.set_main_option("sqlalchemy.url", settings.database.url.get_secret_value(
 target_metadata = Base.metadata
 
 
-def _include_object(_obj: object, _name: str, type_: str, _reflected: bool, _compare_to: object) -> bool:
+def _include_object(
+    _obj: object, _name: str, type_: str, _reflected: bool, _compare_to: object
+) -> bool:
     # We never want Alembic to autogenerate-drop the partition children of audit_log.
     if type_ == "table" and getattr(_obj, "name", "").startswith("audit_log_"):
         return False

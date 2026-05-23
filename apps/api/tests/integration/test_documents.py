@@ -13,6 +13,7 @@ What this test DOES prove:
 * DELETE /v1/documents/{id} removes the row and the MinIO object.
 * All routes are RBAC-protected and tenant-isolated (RLS).
 """
+
 from __future__ import annotations
 
 import io

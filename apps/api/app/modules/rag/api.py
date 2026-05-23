@@ -11,19 +11,20 @@ Endpoints:
     DELETE /v1/documents/{id}          — delete (cascades chunks + storage)
     POST   /v1/documents/search        — semantic search
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from app.core.deps import CurrentPrincipalDep, DBSession
 from app.modules.identity.rbac import require_permission
 from app.modules.rag import service
-from app.modules.rag.events_outbox import emit_document_uploaded
 from app.modules.rag.embeddings import build_default_provider
+from app.modules.rag.events_outbox import emit_document_uploaded
 from app.modules.rag.schemas import (
     DocumentListOut,
     DocumentOut,
@@ -103,7 +104,7 @@ async def upload_document(
         mime_type=mime,
         data=data,
     )
-# Stage the event in the outbox — same transaction as the Document
+    # Stage the event in the outbox — same transaction as the Document
     # INSERT. The outbox publisher loop ships it to Kafka.
     await emit_document_uploaded(db, event)
     logger.info(
@@ -184,14 +185,12 @@ async def delete_document(
         )
     storage = get_storage()
     # Storage key matches the upload-side build. CASCADE handles chunks.
-    key = storage.build_key(
-        org_id=principal.org_id, document_id=doc.id, filename=doc.name
-    )
+    key = storage.build_key(org_id=principal.org_id, document_id=doc.id, filename=doc.name)
     await db.delete(doc)
     await db.flush()
     try:
         await storage.delete(key=key)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning(
             "rag.delete.storage_orphan",
             extra={"key": key, "error": str(e)},

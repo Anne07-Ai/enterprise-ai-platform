@@ -17,8 +17,8 @@ from app.modules.identity.schemas import (
     ChangeRoleRequest,
     InviteRequest,
     LoginRequest,
-    MeOut,
     MembershipOut,
+    MeOut,
     OrganizationCreate,
     OrganizationOut,
     OrganizationUpdate,
@@ -42,7 +42,10 @@ api_keys_router = APIRouter(prefix="/v1/api-keys", tags=["api-keys"])
     "/login",
     response_model=TokenPair,
     summary="Exchange email + password for a token pair",
-    responses={401: {"description": "Invalid credentials"}, 409: {"description": "Multiple orgs — pass org_slug"}},
+    responses={
+        401: {"description": "Invalid credentials"},
+        409: {"description": "Multiple orgs — pass org_slug"},
+    },
 )
 async def login(payload: LoginRequest, request: Request, db: UnscopedDBSession) -> TokenPair:
     user_agent = request.headers.get("user-agent")
@@ -173,9 +176,7 @@ async def update_org(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[require_permission("org:delete")],
 )
-async def delete_org(
-    org_id: UUID, db: DBSession, principal: CurrentPrincipalDep
-) -> None:
+async def delete_org(org_id: UUID, db: DBSession, principal: CurrentPrincipalDep) -> None:
     if org_id != principal.org_id or principal.user_id is None:
         raise AuthorizationError("Cannot delete organizations outside the active context.")
     await service.delete_org(db, org_id=org_id, actor_user_id=principal.user_id)
@@ -191,7 +192,9 @@ async def list_memberships(
 ) -> list[MembershipOut]:
     if org_id != principal.org_id:
         raise AuthorizationError("Cannot list memberships outside the active context.")
-    return [MembershipOut.model_validate(m) for m in await service.list_memberships(db, org_id=org_id)]
+    return [
+        MembershipOut.model_validate(m) for m in await service.list_memberships(db, org_id=org_id)
+    ]
 
 
 @orgs_router.post(
@@ -256,9 +259,7 @@ async def remove_member(
 ) -> None:
     if org_id != principal.org_id or principal.user_id is None:
         raise AuthorizationError("Cannot remove members outside the active context.")
-    await service.remove_member(
-        db, membership_id=membership_id, actor_user_id=principal.user_id
-    )
+    await service.remove_member(db, membership_id=membership_id, actor_user_id=principal.user_id)
 
 
 # --- /v1/api-keys ---------------------------------------------------------
@@ -299,7 +300,10 @@ async def create_api_key(
     dependencies=[require_permission("api_keys:read")],
 )
 async def list_api_keys(db: DBSession, principal: CurrentPrincipalDep) -> list[ApiKeyOut]:
-    return [ApiKeyOut.model_validate(k) for k in await service.list_api_keys(db, org_id=principal.org_id)]
+    return [
+        ApiKeyOut.model_validate(k)
+        for k in await service.list_api_keys(db, org_id=principal.org_id)
+    ]
 
 
 @api_keys_router.delete(
@@ -307,9 +311,7 @@ async def list_api_keys(db: DBSession, principal: CurrentPrincipalDep) -> list[A
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[require_permission("api_keys:revoke")],
 )
-async def revoke_api_key(
-    key_id: UUID, db: DBSession, principal: CurrentPrincipalDep
-) -> None:
+async def revoke_api_key(key_id: UUID, db: DBSession, principal: CurrentPrincipalDep) -> None:
     if principal.user_id is None:
         raise AuthorizationError("API keys cannot revoke other API keys.")
     await service.revoke_api_key(

@@ -21,6 +21,7 @@ Failure:
     still committed (caller's responsibility) so the message doesn't
     re-deliver forever.
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,12 +31,12 @@ from typing import Any
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.rag import service as rag_service
-from app.modules.rag.chunker import chunk_text
 # Import identity models so SQLAlchemy can resolve the FK from
 # documents.created_by -> users.id and documents.org_id ->
 # organizations.id when the worker only loads rag models.
 from app.modules.identity import models as _identity_models  # noqa: F401
+from app.modules.rag import service as rag_service
+from app.modules.rag.chunker import chunk_text
 from app.modules.rag.events import (
     DocumentChunkedV1,
     DocumentFailedV1,
@@ -110,7 +111,7 @@ async def handle_document_uploaded(
             storage_uri=storage_uri,
             mime_type=mime_type,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # Mark failed + emit failure event. We swallow the exception so
         # the Kafka consumer can commit the offset — this isn't a
         # retry-forever situation, the document is poisoned.
@@ -165,9 +166,7 @@ async def _do_ingest(
         raise RuntimeError("extracted text is empty")
 
     # ---- 2. chunk ----------------------------------------------------------
-    await rag_service.mark_status(
-        session, document_id=document_id, status=DocumentStatus.CHUNKING
-    )
+    await rag_service.mark_status(session, document_id=document_id, status=DocumentStatus.CHUNKING)
     chunks = chunk_text(text_content)
     if not chunks:
         raise RuntimeError("chunker produced zero chunks from non-empty text")
@@ -181,9 +180,7 @@ async def _do_ingest(
     )
 
     # ---- 4. mark embedding-pending + emit per-chunk events -----------------
-    await rag_service.mark_status(
-        session, document_id=document_id, status=DocumentStatus.EMBEDDING
-    )
+    await rag_service.mark_status(session, document_id=document_id, status=DocumentStatus.EMBEDDING)
 
     for chunk_row in inserted:
         await emit_document_chunked(

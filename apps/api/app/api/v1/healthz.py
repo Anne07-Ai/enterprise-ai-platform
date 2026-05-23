@@ -12,7 +12,8 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel
 
 from app import __version__
-from app.infra import db, kafka, redis as redis_infra
+from app.infra import db, kafka
+from app.infra import redis as redis_infra
 
 router = APIRouter(tags=["system"])
 
@@ -36,7 +37,9 @@ async def healthz() -> HealthOut:
     "/readyz",
     response_model=ReadyOut,
     summary="Readiness — exercises Postgres, Redis, and Kafka",
-    responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "One or more dependencies unhealthy"}},
+    responses={
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "One or more dependencies unhealthy"}
+    },
 )
 async def readyz() -> ReadyOut:
     async def _check(name: str, coro: object) -> tuple[str, str]:

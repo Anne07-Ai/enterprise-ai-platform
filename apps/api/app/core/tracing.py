@@ -101,6 +101,6 @@ def traced(
                     span.set_status(trace.Status(trace.StatusCode.ERROR, str(exc)))
                     raise
 
-        return cast(Callable[P, Awaitable[R]], wrapper)
+        return cast("Callable[P, Awaitable[R]]", wrapper)
 
     return decorator

@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel earlier runs on the same branch when a new commit lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API (lint + type + unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.x"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('apps/api/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Format check (ruff format --check)
+        run: uv run ruff format --check .
+
+      - name: Type check (mypy)
+        run: uv run mypy app
+        continue-on-error: true
+        # mypy on a large codebase is noisy on first introduction;
+        # we run it but don't block CI on it yet. Remove
+        # continue-on-error once the type baseline is clean.
+
+      - name: Unit tests
+        env:
+          # Required so pydantic-settings doesn't choke on missing values
+          # during module import for the unit test path.
+          EAIP_ENVIRONMENT: local
+          EAIP_OPENAI_API_KEY: "sk-test-not-real"
+          EAIP_ANTHROPIC_API_KEY: "sk-ant-test-not-real"
+          EAIP_SKIP_CONTAINERS: "1"
+        run: uv run pytest tests/unit -v --cov-fail-under=0
+
+  # Integration tests are not in CI yet. They require Postgres+pgvector,
+  # MinIO, Redpanda, and outbound network for OpenAI/Anthropic, and have
+  # two known-failing tests documented in KNOWN_ISSUES.md. They run on
+  # the dev box via `make test-integration`. When the failing tests are
+  # fixed and the LLM mocks are in place, this job will be added.

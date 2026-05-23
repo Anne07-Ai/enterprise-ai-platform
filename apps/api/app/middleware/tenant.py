@@ -17,7 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.middleware.auth import _is_public, PUBLIC_PATHS
+from app.middleware.auth import PUBLIC_PATHS, _is_public
 
 
 class TenantMiddleware(BaseHTTPMiddleware):

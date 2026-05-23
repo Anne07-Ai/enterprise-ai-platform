@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.modules.identity.rbac import (
     OrgRole,
     has_permission,

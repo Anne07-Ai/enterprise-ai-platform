@@ -47,7 +47,7 @@ async def dispose_producer() -> None:
         try:
             await _producer.stop()
             logger.info("kafka.producer.stopped")
-        except (RuntimeError, Exception) as e:  # noqa: BLE001
+        except (RuntimeError, Exception) as e:
             logger.debug("kafka.producer.dispose_suppressed", error=str(e))
     _producer = None
 

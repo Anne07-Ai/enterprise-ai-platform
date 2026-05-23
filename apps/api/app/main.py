@@ -32,7 +32,8 @@ from app.core.config import get_settings
 from app.core.errors import install_exception_handlers
 from app.core.logging import get_logger, setup_logging
 from app.core.tracing import instrument_fastapi, setup_tracing
-from app.infra import kafka, outbox, redis as redis_infra
+from app.infra import kafka, outbox
+from app.infra import redis as redis_infra
 from app.infra.db import dispose_engine, get_engine
 from app.middleware.audit import AuditMiddleware
 from app.middleware.auth import AuthMiddleware

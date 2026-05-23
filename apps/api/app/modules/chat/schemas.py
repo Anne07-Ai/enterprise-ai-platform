@@ -10,6 +10,7 @@ Keeping schemas separate from agent.AgentResult means:
     * Validation errors are caught at the API boundary, not inside
       the agent.
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -74,7 +75,6 @@ class ChatResponse(BaseModel):
     )
     truncated: bool = Field(
         description=(
-            "True if the agent hit MAX_ITERATIONS before finishing. "
-            "The answer may be partial."
+            "True if the agent hit MAX_ITERATIONS before finishing. The answer may be partial."
         ),
     )

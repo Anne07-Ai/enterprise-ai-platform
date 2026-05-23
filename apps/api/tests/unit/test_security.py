@@ -5,7 +5,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-
 from app.core.errors import AuthenticationError
 from app.modules.identity.security import (
     generate_api_key,

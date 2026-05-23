@@ -8,19 +8,16 @@ TRUNCATE between tests rather than container restart to keep the loop fast.
 
 from __future__ import annotations
 
-import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
 import pytest_asyncio
+from app.core.config import Environment, get_settings
+from app.modules.identity.security import reset_jwt_keys_for_tests
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.config import Environment, get_settings
-from app.modules.identity.security import reset_jwt_keys_for_tests
-
 
 # --- containers ---------------------------------------------------------
 
@@ -107,21 +104,20 @@ def _truncate_tables() -> Iterator[None]:
     """
     yield
     import re
-    import psycopg2
 
+    import psycopg2
     from app.core.config import get_settings
 
     url = get_settings().database.url.get_secret_value()
     # convert SQLAlchemy URL (postgresql+asyncpg://...) to libpq form for psycopg2
-    sync_url = re.sub(r'^postgresql\+asyncpg://', 'postgresql://', url)
+    sync_url = re.sub(r"^postgresql\+asyncpg://", "postgresql://", url)
     conn = psycopg2.connect(sync_url)
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "TRUNCATE TABLE refresh_tokens, api_keys, memberships, outbox, "
-                    "audit_log, organizations, users RESTART IDENTITY CASCADE"
-                )
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "TRUNCATE TABLE refresh_tokens, api_keys, memberships, outbox, "
+                "audit_log, organizations, users RESTART IDENTITY CASCADE"
+            )
     finally:
         conn.close()
 
@@ -134,9 +130,8 @@ async def db_session() -> AsyncIterator[AsyncSession]:
     from app.infra.db import get_sessionmaker
 
     sm = get_sessionmaker()
-    async with sm() as session:
-        async with session.begin():
-            yield session
+    async with sm() as session, session.begin():
+        yield session
 
 
 @pytest_asyncio.fixture
@@ -146,18 +141,15 @@ async def db_for_org() -> object:
 
     async def _factory(org_id: object) -> AsyncIterator[AsyncSession]:
         sm = get_sessionmaker()
-        async with sm() as session:
-            async with session.begin():
-                if org_id is not None:
-                    await session.execute(
-                        text("SELECT set_config('app.current_org', :o, true)"),
-                        {"o": str(org_id)},
-                    )
-                yield session
+        async with sm() as session, session.begin():
+            if org_id is not None:
+                await session.execute(
+                    text("SELECT set_config('app.current_org', :o, true)"),
+                    {"o": str(org_id)},
+                )
+            yield session
 
     return _factory
-
-
 
 
 # --- Reset module-level singletons between tests ---
@@ -167,7 +159,9 @@ async def db_for_org() -> object:
 # "Connection._cancel was never awaited" warnings. We reset them per test.
 @pytest_asyncio.fixture(autouse=True)
 async def _reset_infra_singletons() -> AsyncIterator[None]:
-    from app.infra import db as _db, redis as _redis, kafka as _kafka
+    from app.infra import db as _db
+    from app.infra import kafka as _kafka
+    from app.infra import redis as _redis
 
     # Pre-test: clear any leftover singletons.
     _db._engine = None
@@ -199,6 +193,7 @@ async def _reset_infra_singletons() -> AsyncIterator[None]:
     _redis._pool = None
     _redis._client = None
     _kafka._producer = None
+
 
 # --- HTTP client --------------------------------------------------------
 

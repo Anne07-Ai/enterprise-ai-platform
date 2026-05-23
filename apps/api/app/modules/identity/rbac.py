@@ -32,21 +32,40 @@ ROLE_RANK: dict[str, int] = {
 }
 
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
-OrgRole.OWNER: frozenset(
+    OrgRole.OWNER: frozenset(
         {
-            "org:read", "org:update", "org:delete",
-            "members:read", "members:invite", "members:remove", "members:change_role",
-            "api_keys:read", "api_keys:create", "api_keys:revoke",
-"documents:read", "documents:create", "documents:search", "documents:delete",
+            "org:read",
+            "org:update",
+            "org:delete",
+            "members:read",
+            "members:invite",
+            "members:remove",
+            "members:change_role",
+            "api_keys:read",
+            "api_keys:create",
+            "api_keys:revoke",
+            "documents:read",
+            "documents:create",
+            "documents:search",
+            "documents:delete",
             "chat:create",
         }
     ),
     OrgRole.ADMIN: frozenset(
         {
-            "org:read", "org:update",
-            "members:read", "members:invite", "members:remove", "members:change_role",
-            "api_keys:read", "api_keys:create", "api_keys:revoke",
-            "documents:read", "documents:create", "documents:search", "documents:delete",
+            "org:read",
+            "org:update",
+            "members:read",
+            "members:invite",
+            "members:remove",
+            "members:change_role",
+            "api_keys:read",
+            "api_keys:create",
+            "api_keys:revoke",
+            "documents:read",
+            "documents:create",
+            "documents:search",
+            "documents:delete",
             "chat:create",
         }
     ),
@@ -55,7 +74,9 @@ OrgRole.OWNER: frozenset(
             "org:read",
             "members:read",
             "api_keys:read",
-            "documents:read", "documents:create", "documents:search",
+            "documents:read",
+            "documents:create",
+            "documents:search",
             "chat:create",
         }
     ),
@@ -63,7 +84,8 @@ OrgRole.OWNER: frozenset(
         {
             "org:read",
             "members:read",
-            "documents:read", "documents:search",
+            "documents:read",
+            "documents:search",
             "chat:create",
         }
     ),
@@ -90,8 +112,6 @@ def require_permission(permission: str) -> object:
             return
         if has_permission(principal.role, permission):
             return
-        raise AuthorizationError(
-            f"Missing permission '{permission}' for role '{principal.role}'."
-        )
+        raise AuthorizationError(f"Missing permission '{permission}' for role '{principal.role}'.")
 
     return Depends(_checker)

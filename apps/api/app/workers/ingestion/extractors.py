@@ -7,6 +7,7 @@ preserved by double-newline separation.
 Future formats (docx, html, csv) plug in here without touching the
 worker entrypoint.
 """
+
 from __future__ import annotations
 
 import io
@@ -66,14 +67,14 @@ def _extract_text_pdf(data: bytes) -> str:
     """
     try:
         reader = PdfReader(io.BytesIO(data))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ExtractionError(f"pdf parse failed: {exc!s}") from exc
 
     pages: list[str] = []
     for page in reader.pages:
         try:
             text = page.extract_text() or ""
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "extractor.pdf_page_failed",
                 extra={"error": str(exc)},

@@ -5,12 +5,12 @@ around these functions. All tenant isolation, persistence, event
 publishing, and similarity search logic lives here so it can be
 unit-tested independently of FastAPI.
 """
+
 from __future__ import annotations
 
-import json
 import logging
 import uuid
-from typing import Sequence
+from collections.abc import Sequence
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.rag.embeddings import EmbeddingProvider
 from app.modules.rag.events import DocumentUploadedV1
 from app.modules.rag.models import Document, DocumentChunk, DocumentStatus
-from app.modules.rag.schemas import DocumentSearchHit, DocumentChunkOut
+from app.modules.rag.schemas import DocumentChunkOut, DocumentSearchHit
 from app.modules.rag.storage import DocumentStorage
 
 logger = logging.getLogger(__name__)
@@ -72,9 +72,7 @@ async def create_document(
     session.add(document)
     await session.flush()  # populates document.id
 
-    key = storage.build_key(
-        org_id=org_id, document_id=document.id, filename=name
-    )
+    key = storage.build_key(org_id=org_id, document_id=document.id, filename=name)
     uri = storage.build_uri(key)
 
     # Storage write happens BEFORE we finalize the row. If storage
@@ -134,12 +132,7 @@ async def list_documents(
     total_stmt = select(func.count()).select_from(Document)
     total = (await session.execute(total_stmt)).scalar_one()
 
-    stmt = (
-        select(Document)
-        .order_by(Document.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+    stmt = select(Document).order_by(Document.created_at.desc()).limit(limit).offset(offset)
     rows = (await session.execute(stmt)).scalars().all()
     return list(rows), total
 
@@ -219,9 +212,7 @@ async def mark_status(
 
     doc = await get_document(session, document_id=document_id)
     if doc is None:
-        logger.warning(
-            "rag.mark_status.missing", extra={"document_id": str(document_id)}
-        )
+        logger.warning("rag.mark_status.missing", extra={"document_id": str(document_id)})
         return
     doc.status = status
     if error_message is not None:

@@ -19,6 +19,7 @@ Events flow:
 Schemas are Pydantic models for validation. Topic names follow the
 ``<aggregate>.<event>.v<n>`` convention so we can evolve later.
 """
+
 from __future__ import annotations
 
 import uuid

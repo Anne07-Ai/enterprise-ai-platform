@@ -23,6 +23,7 @@ Failure modes:
     where an earlier embedding failed mid-way and the document was
     marked failed manually.
 """
+
 from __future__ import annotations
 
 import logging
@@ -73,14 +74,10 @@ async def handle_document_chunked(
     embedding = vectors[0]
 
     # ---- 2. UPDATE the chunk row ------------------------------------------
-    await rag_service.update_chunk_embedding(
-        session, chunk_id=chunk_id, embedding=embedding
-    )
+    await rag_service.update_chunk_embedding(session, chunk_id=chunk_id, embedding=embedding)
 
     # ---- 3. is this the last chunk? ---------------------------------------
-    pending = await rag_service.count_chunks_pending_embedding(
-        session, document_id=document_id
-    )
+    pending = await rag_service.count_chunks_pending_embedding(session, document_id=document_id)
     if pending > 0:
         logger.info(
             "embedding.chunk.done",

@@ -19,6 +19,7 @@ Session policy:
     open for the whole turn so all reads see a consistent snapshot.
     On error we roll back. On success we commit.
 """
+
 from __future__ import annotations
 
 import logging
@@ -50,18 +51,15 @@ async def handle_chat(
     appropriate status codes (5xx for upstream LLM failures, 5xx for
     DB failures, etc.).
     """
-    history = [
-        {"role": m.role, "content": m.content} for m in request.history
-    ]
+    history = [{"role": m.role, "content": m.content} for m in request.history]
 
-    async with session_maker() as session:
-        async with session.begin():
-            result = await agent_run(
-                session,
-                org_id=org_id,
-                user_message=request.message,
-                history=history,
-            )
+    async with session_maker() as session, session.begin():
+        result = await agent_run(
+            session,
+            org_id=org_id,
+            user_message=request.message,
+            history=history,
+        )
 
     logger.info(
         "chat.completed",
@@ -89,6 +87,7 @@ async def handle_chat(
         truncated=result.truncated,
     )
 
+
 async def handle_chat_stream(
     session_maker,
     *,
@@ -106,23 +105,20 @@ async def handle_chat_stream(
     generator exits (success, exception, or client disconnect).
     """
     from app.modules.chat.agent import run_streaming
-    from app.modules.chat.sse import ErrorEvent, DoneEvent
+    from app.modules.chat.sse import DoneEvent, ErrorEvent
 
     history = [{"role": m.role, "content": m.content} for m in request.history]
 
-    async with session_maker() as session:
-        async with session.begin():
-            try:
-                async for event in run_streaming(
-                    session,
-                    org_id=org_id,
-                    user_message=request.message,
-                    history=history,
-                ):
-                    yield event
-            except Exception as exc:  # noqa: BLE001
-                logger.exception(
-                    "chat.stream.failed", extra={"org_id": str(org_id)}
-                )
-                yield ErrorEvent(message=str(exc), code="internal")
-                yield DoneEvent(iterations=0, truncated=False)
+    async with session_maker() as session, session.begin():
+        try:
+            async for event in run_streaming(
+                session,
+                org_id=org_id,
+                user_message=request.message,
+                history=history,
+            ):
+                yield event
+        except Exception as exc:
+            logger.exception("chat.stream.failed", extra={"org_id": str(org_id)})
+            yield ErrorEvent(message=str(exc), code="internal")
+            yield DoneEvent(iterations=0, truncated=False)

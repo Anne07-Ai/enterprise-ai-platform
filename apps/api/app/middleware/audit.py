@@ -24,7 +24,7 @@ from starlette.responses import Response
 
 from app.core.logging import get_logger
 from app.infra.db import session_for_request
-from app.middleware.auth import _is_public, PUBLIC_PATHS
+from app.middleware.auth import PUBLIC_PATHS, _is_public
 from app.modules.identity.events import emit_audit
 
 logger = get_logger(__name__)

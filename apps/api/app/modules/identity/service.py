@@ -11,8 +11,6 @@ like login.
 
 from __future__ import annotations
 
-import secrets
-from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,24 +21,22 @@ from app.core.errors import (
     ConflictError,
 )
 from app.core.tracing import traced
-from app.modules.identity import events, repository as repo
+from app.modules.identity import events
+from app.modules.identity import repository as repo
 from app.modules.identity.models import (
     ApiKey,
     Membership,
     Organization,
-    RefreshToken,
     User,
 )
 from app.modules.identity.rbac import OrgRole, role_at_least
 from app.modules.identity.security import (
     generate_api_key,
     hash_opaque_token,
-    hash_password,
     mint_access_token,
     mint_refresh_token,
     verify_password,
 )
-
 
 # --- orgs ----------------------------------------------------------------
 
@@ -176,9 +172,7 @@ async def change_member_role(
 
 
 @traced("identity.remove_member")
-async def remove_member(
-    session: AsyncSession, *, membership_id: UUID, actor_user_id: UUID
-) -> None:
+async def remove_member(session: AsyncSession, *, membership_id: UUID, actor_user_id: UUID) -> None:
     membership = await session.get(Membership, membership_id)
     if membership is None:
         from app.core.errors import NotFoundError
@@ -261,12 +255,8 @@ async def authenticate(
             "User belongs to multiple organizations. Pass `org_slug` to disambiguate."
         )
 
-    access_token, _, exp = mint_access_token(
-        user_id=user.id, org_id=org.id, role=membership.role
-    )
-    refresh_token, refresh_hash, refresh_exp = mint_refresh_token(
-        user_id=user.id, org_id=org.id
-    )
+    access_token, _, exp = mint_access_token(user_id=user.id, org_id=org.id, role=membership.role)
+    refresh_token, refresh_hash, refresh_exp = mint_refresh_token(user_id=user.id, org_id=org.id)
     await repo.store_refresh_token(
         session,
         org_id=org.id,
@@ -307,9 +297,7 @@ async def refresh_tokens(
     if membership is None:
         raise AuthorizationError("Membership has been revoked.")
 
-    new_access, _, _ = mint_access_token(
-        user_id=rt.user_id, org_id=rt.org_id, role=membership.role
-    )
+    new_access, _, _ = mint_access_token(user_id=rt.user_id, org_id=rt.org_id, role=membership.role)
     new_refresh, new_hash, new_exp = mint_refresh_token(user_id=rt.user_id, org_id=rt.org_id)
     new_record = await repo.store_refresh_token(
         session,
@@ -336,9 +324,7 @@ async def refresh_tokens(
 async def logout(
     session: AsyncSession, *, refresh_token: str, actor_user_id: UUID, org_id: UUID
 ) -> None:
-    rt = await repo.get_active_refresh_token(
-        session, token_hash=hash_opaque_token(refresh_token)
-    )
+    rt = await repo.get_active_refresh_token(session, token_hash=hash_opaque_token(refresh_token))
     if rt is None:
         # Idempotent — logout on an already-revoked token is fine.
         return
@@ -412,9 +398,7 @@ async def revoke_api_key(
 
 
 @traced("identity.resolve_api_key")
-async def resolve_api_key(
-    session: AsyncSession, *, plaintext: str
-) -> tuple[ApiKey, Organization]:
+async def resolve_api_key(session: AsyncSession, *, plaintext: str) -> tuple[ApiKey, Organization]:
     """Look up an API key by its plaintext; raise on unknown or revoked keys.
 
     Used by the auth middleware. We extract the prefix portion (the visible
@@ -454,21 +438,21 @@ async def user_for_principal(session: AsyncSession, *, user_id: UUID) -> User:
 
 # Re-exported for cross-module imports.
 __all__ = [
-    "create_org",
-    "get_org",
-    "update_org",
-    "delete_org",
-    "invite_member",
-    "change_member_role",
-    "remove_member",
-    "list_memberships",
-    "memberships_for_user",
     "authenticate",
-    "refresh_tokens",
-    "logout",
+    "change_member_role",
     "create_api_key_for_org",
+    "create_org",
+    "delete_org",
+    "get_org",
+    "invite_member",
     "list_api_keys",
-    "revoke_api_key",
+    "list_memberships",
+    "logout",
+    "memberships_for_user",
+    "refresh_tokens",
+    "remove_member",
     "resolve_api_key",
+    "revoke_api_key",
+    "update_org",
     "user_for_principal",
 ]

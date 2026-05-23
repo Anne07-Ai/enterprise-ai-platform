@@ -21,7 +21,6 @@ from app.modules.identity.models import (
     User,
 )
 
-
 # --- organizations -------------------------------------------------------
 
 
@@ -33,7 +32,9 @@ async def get_org_by_id(session: AsyncSession, org_id: UUID) -> Organization:
 
 
 async def get_org_by_slug(session: AsyncSession, slug: str) -> Organization | None:
-    return (await session.execute(select(Organization).where(Organization.slug == slug))).scalar_one_or_none()
+    return (
+        await session.execute(select(Organization).where(Organization.slug == slug))
+    ).scalar_one_or_none()
 
 
 async def create_org(session: AsyncSession, *, slug: str, name: str, is_test: bool) -> Organization:
@@ -69,9 +70,7 @@ async def get_user_by_id(session: AsyncSession, user_id: UUID) -> User:
 
 
 async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
-    return (
-        await session.execute(select(User).where(User.email == email))
-    ).scalar_one_or_none()
+    return (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
 
 
 async def create_user(

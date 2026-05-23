@@ -17,6 +17,7 @@ Tenant scoping:
     from the LLM. The LLM cannot escalate scope by lying in its
     function-call arguments.
 """
+
 from __future__ import annotations
 
 import logging
@@ -107,9 +108,7 @@ async def search_documents(
 
     embedder = build_default_provider()
     try:
-        hits = await rag_service.search_chunks(
-            session, embedder, query=query, limit=limit
-        )
+        hits = await rag_service.search_chunks(session, embedder, query=query, limit=limit)
     finally:
         await embedder.aclose()
 

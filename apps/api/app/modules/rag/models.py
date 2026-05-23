@@ -7,11 +7,11 @@ The ``Document.status`` field is a plain string with a CHECK constraint
 in the migration (see ADR-006 for why we avoid Postgres ENUMs). The
 ``DocumentStatus`` class below is a type-checking convenience, not a DB type.
 """
+
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -30,9 +30,6 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infra.db import Base
-
-if TYPE_CHECKING:
-    pass  # type-only imports if needed later
 
 
 class DocumentStatus:
@@ -84,7 +81,7 @@ class Document(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    chunks: Mapped[list["DocumentChunk"]] = relationship(
+    chunks: Mapped[list[DocumentChunk]] = relationship(
         "DocumentChunk",
         back_populates="document",
         cascade="all, delete-orphan",
@@ -98,8 +95,7 @@ class Document(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<Document id={self.id} org_id={self.org_id} "
-            f"name={self.name!r} status={self.status}>"
+            f"<Document id={self.id} org_id={self.org_id} name={self.name!r} status={self.status}>"
         )
 
 
@@ -123,14 +119,12 @@ class DocumentChunk(Base):
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(1536), nullable=True
-    )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    document: Mapped["Document"] = relationship("Document", back_populates="chunks")
+    document: Mapped[Document] = relationship("Document", back_populates="chunks")
 
     __table_args__ = (
         UniqueConstraint(

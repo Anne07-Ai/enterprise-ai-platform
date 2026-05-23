@@ -22,12 +22,12 @@ Why a separate module:
     * If we add a different transport later (e.g. WebSocket frames),
       we swap the formatter without touching the event semantics.
 """
+
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 from typing import Any, Union
-
 
 # --- event payloads -------------------------------------------------------
 
@@ -132,4 +132,3 @@ def format_heartbeat() -> str:
     """A comment line. Sent periodically to keep proxies from
     timing out a quiet connection. Clients ignore comment lines."""
     return ": keepalive\n\n"
-    

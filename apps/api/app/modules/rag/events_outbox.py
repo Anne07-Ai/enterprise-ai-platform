@@ -7,6 +7,7 @@ api.py / workers don't have to know the dict shape.
 The actual Kafka publish is done asynchronously by the outbox publisher
 loop (started in app.main) — this module only writes the outbox row.
 """
+
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,9 +21,7 @@ from app.modules.rag.events import (
 )
 
 
-async def emit_document_uploaded(
-    session: AsyncSession, event: DocumentUploadedV1
-) -> None:
+async def emit_document_uploaded(session: AsyncSession, event: DocumentUploadedV1) -> None:
     """Stage a document.uploaded.v1 event for publication."""
     await enqueue(
         session,
@@ -35,9 +34,7 @@ async def emit_document_uploaded(
     )
 
 
-async def emit_document_chunked(
-    session: AsyncSession, event: DocumentChunkedV1
-) -> None:
+async def emit_document_chunked(session: AsyncSession, event: DocumentChunkedV1) -> None:
     """Stage a document.chunked.v1 event for publication."""
     await enqueue(
         session,
@@ -49,9 +46,7 @@ async def emit_document_chunked(
     )
 
 
-async def emit_document_ready(
-    session: AsyncSession, event: DocumentReadyV1
-) -> None:
+async def emit_document_ready(session: AsyncSession, event: DocumentReadyV1) -> None:
     """Stage a document.ready.v1 event for publication."""
     await enqueue(
         session,
@@ -63,9 +58,7 @@ async def emit_document_ready(
     )
 
 
-async def emit_document_failed(
-    session: AsyncSession, event: DocumentFailedV1
-) -> None:
+async def emit_document_failed(session: AsyncSession, event: DocumentFailedV1) -> None:
     """Stage a document.failed.v1 event for publication."""
     await enqueue(
         session,

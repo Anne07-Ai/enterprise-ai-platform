@@ -19,7 +19,7 @@ from starlette.responses import Response
 from app.core.config import get_settings
 from app.core.errors import RateLimitedError, domain_error_handler
 from app.infra.redis import get_redis
-from app.middleware.auth import _is_public, PUBLIC_PATHS
+from app.middleware.auth import PUBLIC_PATHS, _is_public
 
 # KEYS[1] = bucket key
 # ARGV[1] = capacity, ARGV[2] = refill_rate_per_s, ARGV[3] = now_ms, ARGV[4] = ttl
@@ -57,7 +57,7 @@ return {allowed, retry_ms}
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: object) -> None:  # noqa: D401
+    def __init__(self, app: object) -> None:
         super().__init__(app)
         self._script_sha: str | None = None
 
@@ -89,8 +89,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             self._script_sha,
             1,
             f"{s.redis_key_prefix}:ip:{ip}",  # type: ignore[attr-defined]
-            s.per_ip_burst,                   # type: ignore[attr-defined]
-            s.per_ip_rps,                     # type: ignore[attr-defined]
+            s.per_ip_burst,  # type: ignore[attr-defined]
+            s.per_ip_rps,  # type: ignore[attr-defined]
             now_ms,
             ttl,
         )
@@ -106,8 +106,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 self._script_sha,
                 1,
                 f"{s.redis_key_prefix}:org:{org_id}",  # type: ignore[attr-defined]
-                s.per_org_burst,                       # type: ignore[attr-defined]
-                s.per_org_rps,                         # type: ignore[attr-defined]
+                s.per_org_burst,  # type: ignore[attr-defined]
+                s.per_org_rps,  # type: ignore[attr-defined]
                 now_ms,
                 ttl,
             )
