@@ -51,7 +51,65 @@ Verified end-to-end against the local stack:
   Grafana.
 
 ## Architecture
+
+```mermaid
+flowchart TB
+    client["Client<br/>(curl, web app)"]
+
+    subgraph api["FastAPI (modular monolith)"]
+        auth["Auth & RBAC<br/>JWT · per-org permissions"]
+        rag_api["RAG endpoints<br/>POST /v1/documents<br/>POST /v1/documents/search"]
+        chat_api["Chat endpoints<br/>POST /v1/chat<br/>POST /v1/chat/stream (SSE)"]
+        outbox["Transactional outbox<br/>(Postgres → Kafka)"]
+    end
+
+    subgraph data["Data plane"]
+        postgres[("Postgres 16<br/>+ pgvector<br/>+ Row-Level Security")]
+        minio[("MinIO<br/>(S3-compatible)<br/>raw files")]
+        redis[("Redis<br/>cache, rate limits")]
+    end
+
+    subgraph kafka["Kafka (Redpanda)"]
+        t_uploaded["document.uploaded.v1"]
+        t_chunked["document.chunked.v1"]
+        t_ready["document.ready.v1"]
+    end
+
+    subgraph workers["Async workers"]
+        ingestion["ingestion-worker<br/>extract + chunk"]
+        embedding["embedding-worker<br/>OpenAI embed"]
+    end
+
+    subgraph external["External APIs"]
+        anthropic["Anthropic<br/>Claude Sonnet 4.6"]
+        openai["OpenAI<br/>text-embedding-3-small"]
+    end
+
+    client -->|HTTP+JWT| auth
+    auth --> rag_api
+    auth --> chat_api
+
+    rag_api -->|store metadata| postgres
+    rag_api -->|store file| minio
+    rag_api -->|emit event| outbox
+    outbox --> t_uploaded
+
+    t_uploaded --> ingestion
+    ingestion -->|fetch file| minio
+    ingestion -->|insert chunks| postgres
+    ingestion --> t_chunked
+
+    t_chunked --> embedding
+    embedding -->|embed| openai
+    embedding -->|write vector| postgres
+    embedding --> t_ready
+
+    chat_api -->|stream| anthropic
+    chat_api -.->|search_documents tool| postgres
+```
+
 Three principles:
+
 
 1. **One transactional store for everything (Postgres)** including embeddings
    via pgvector. Tenant isolation is a database-layer property, not an
