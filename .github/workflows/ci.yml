@@ -18,6 +18,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: eaip
+          POSTGRES_PASSWORD: eaip
+          POSTGRES_DB: eaip
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     defaults:
       run:
         working-directory: apps/api
@@ -70,6 +85,7 @@ jobs:
           EAIP_OPENAI_API_KEY: "sk-test-not-real"
           EAIP_ANTHROPIC_API_KEY: "sk-ant-test-not-real"
           EAIP_SKIP_CONTAINERS: "1"
+          EAIP_DATABASE_URL: "postgresql+asyncpg://eaip:eaip@localhost:5432/eaip"
         run: uv run pytest tests/unit -v --cov-fail-under=0
 
   # Integration tests are not in CI yet. They require Postgres+pgvector,
