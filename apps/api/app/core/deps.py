@@ -7,6 +7,7 @@ without dragging the world along.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 from uuid import UUID
 
@@ -88,7 +89,7 @@ async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
     the single place application code obtains a session.
     """
     org_id: UUID | None = getattr(request.state, "org_id", None)
-    async for session in session_for_request(org_id=org_id):
+    async with asynccontextmanager(session_for_request)(org_id=org_id) as session:
         yield session
 
 

@@ -15,15 +15,18 @@ import asyncio
 import contextlib
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.infra import kafka as kafka_infra
-from app.infra.db import get_sessionmaker
+from app.infra.db import session_unscoped
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
 
 logger = get_logger(__name__)
 
@@ -74,9 +77,10 @@ async def enqueue(
 
 async def _publish_batch(batch_size: int = 100) -> int:
     """Publish up to ``batch_size`` outbox rows. Returns the number published."""
-    sm = get_sessionmaker()
     published = 0
-    async with sm() as session, session.begin():
+    # The internal publisher scans all tenants, including system events
+    # without an org. Keep its RLS bypass local to this batch transaction.
+    async with contextlib.asynccontextmanager(session_unscoped)() as session:
         # SELECT FOR UPDATE SKIP LOCKED is the canonical worker pattern: many
         # publishers can run concurrently without stepping on each other.
         rows = (

@@ -3,8 +3,8 @@
 The single source of truth for tenant scoping is the Postgres GUC
 ``app.current_org``. ``session_for_request`` opens a transaction and calls
 ``set_config('app.current_org', :org, true)`` so the value is automatically
-rolled back when the transaction commits or aborts. This means a connection
-returning to the pool can never leak tenant context to a subsequent caller.
+rolled back when the transaction commits or aborts. Keep these settings
+transaction-local so pooled connections don't retain tenant context.
 
 App-layer queries should still include ``WHERE org_id = :org`` predicates as
 defense in depth, but the RLS policies on every tenant-scoped table are the
@@ -13,12 +13,10 @@ primary control. See ADR-0004.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import event, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import AdaptedConnection, Engine
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -30,6 +28,13 @@ from sqlalchemy.orm import DeclarativeBase
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from uuid import UUID
+
+    from sqlalchemy.pool import ConnectionPoolEntry
+
+
 logger = get_logger(__name__)
 
 
@@ -39,6 +44,37 @@ class Base(DeclarativeBase):
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+
+
+async def _verify_runtime_role(connection: Any) -> None:
+    # Check the login role, including memberships, because a login can reset
+    # SET ROLE or switch to a reachable role. PostgreSQL ignores FORCE RLS
+    # for superusers and roles with BYPASSRLS.
+    try:
+        can_bypass = await connection.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_roles AS r
+                WHERE (r.rolsuper OR r.rolbypassrls)
+                  AND pg_catalog.pg_has_role(session_user, r.oid, 'MEMBER')
+            )
+            """
+        )
+        if can_bypass is not False:
+            raise RuntimeError(
+                "The database runtime login must not have SUPERUSER or BYPASSRLS access."
+            )
+    except BaseException:
+        # A rejected connect listener runs before SQLAlchemy checks out the
+        # connection. Close the physical connection here rather than relying
+        # on normal pool return, including when the probe is cancelled.
+        connection.terminate()
+        raise
+
+
+def _check_runtime_role(connection: AdaptedConnection, _record: ConnectionPoolEntry) -> None:
+    connection.run_async(_verify_runtime_role)
 
 
 def _build_engine(settings: Settings) -> AsyncEngine:
@@ -58,12 +94,7 @@ def _build_engine(settings: Settings) -> AsyncEngine:
         future=True,
     )
 
-    # Hook into the underlying sync engine to set per-checkout session params.
-    @event.listens_for(engine.sync_engine, "checkout")
-    def _on_checkout(dbapi_connection: Any, _record: Any, _proxy: Any) -> None:
-        # asyncpg DBAPI connections expose a sync interface here; nothing
-        # tenant-specific is set on checkout — that happens in session_for_request.
-        del dbapi_connection  # explicitly unused
+    event.listen(engine.sync_engine, "connect", _check_runtime_role)
 
     return engine
 
@@ -133,6 +164,7 @@ async def session_unscoped() -> AsyncIterator[AsyncSession]:
     Use ONLY for:
       * Unauthenticated paths that must look up identity data before the org
         is known (login, refresh, API-key resolution).
+      * The internal outbox publisher, which scans the queue across tenants.
       * Migration tools and the seed script.
 
     Application request handlers must use ``session_for_request`` instead.

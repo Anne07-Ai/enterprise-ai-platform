@@ -1,38 +1,41 @@
-# Known Issues
+# Known issues and verification
 
-## Phase 2 — 2 of 43 tests failing
+## Quality gates
 
-### `tests/integration/test_rls_isolation.py::test_cross_tenant_rows_are_invisible_under_rls`
+| Check | Local evidence |
+| --- | --- |
+| Unit tests | 37 passed without dependency URLs or provider credentials. |
+| Targeted integration tests | 13 passed against disposable PostgreSQL, Redis, and Redpanda. |
+| Ruff format | All 86 files passed. CI treats formatting as a blocking check. |
+| Ruff lint | 103 existing findings. The CI step remains advisory. |
+| mypy | 96 existing errors across 14 files. The CI step remains advisory. |
 
-**Symptom:** Test asserts `len(memberships) == 1` but gets 2 rows when querying as tenant A. Test indicates RLS policy may be leaking org B's row to org A's session.
+Hosted CI verification is pending. The full integration suite also requires a
+disposable S3-compatible endpoint for the document roundtrip.
 
-**Status:** Investigation incomplete. The policy expression in `alembic/versions/0001_init_identity_and_audit.py` looks correct (`org_id = NULLIF(current_setting('app.current_org', true), '')::uuid OR current_setting('app.bypass_rls', true) = 'on'`). All `set_config` calls use `is_local=true`. RLS is verified enabled on the relevant tables. Suspect: connection-pool state interaction with how SQLAlchemy releases connections in tests.
+## Tenant isolation and organization creation
 
-**Production impact:** Unknown. RLS policies are correctly installed in the migration; a manual end-to-end check via the running API (not the test harness) is needed to determine whether the leak is real or a test-harness artifact.
+The application checks runtime login privileges on new physical connections.
+Use distinct schema-owner and restricted runtime logins, as described in
+[database roles](docs/database-roles.md).
 
-**Next steps:** Instrument with `current_setting('app.bypass_rls', true)` and `current_setting('app.current_org', true)` immediately before the failing assertion. If `bypass_rls='on'` shows up unexpectedly,
-cd ~/projects/enterprise-ai-platform
-cat > KNOWN_ISSUES.md <<'EOF'
-# Known Issues
+The targeted database tests cover representative tenant reads and writes,
+pooled commit and rollback, tenant and bypass reset, organization creation
+and rollback, and internal outbox database access. This evidence covers the
+tested policies and depends on the effective privileges of the deployed login.
+The outbox test substitutes broker send. End-to-end delivery remains a
+separate check.
 
-## Phase 2 — 2 of 43 tests failing
+## Readiness
 
-### `tests/integration/test_rls_isolation.py::test_cross_tenant_rows_are_invisible_under_rls`
+`/readyz` passed its PostgreSQL, Redis, and Kafka checks against disposable
+services. The Kafka probe checks metadata reachability. Controlled tests cover
+dependency failure reporting, timeout cancellation, producer startup and
+retry, and partial startup cleanup.
 
-**Symptom:** Test asserts `len(memberships) == 1` but gets 2 rows when querying as tenant A. Test indicates RLS policy may be leaking org B's row to org A's session.
+## Identity follow-ups
 
-**Status:** Investigation incomplete. The policy expression in `alembic/versions/0001_init_identity_and_audit.py` looks correct (`org_id = NULLIF(current_setting('app.current_org', true), '')::uuid OR current_setting('app.bypass_rls', true) = 'on'`). All `set_config` calls use `is_local=true`. RLS is verified enabled on the relevant tables. Suspect: connection-pool state interaction with how SQLAlchemy releases connections in tests.
-
-**Production impact:** Unknown. RLS policies are correctly installed in the migration; a manual end-to-end check via the running API (not the test harness) is needed to determine whether the leak is real or a test-harness artifact.
-
-**Next steps:** Instrument with `current_setting('app.bypass_rls', true)` and `current_setting('app.current_org', true)` immediately before the failing assertion. If `bypass_rls='on'` shows up unexpectedly, fix the leak. If GUCs look correct, the bug is elsewhere — possibly in how SQLAlchemy's session pool handles transaction-local settings.
-
-### `tests/integration/test_healthz.py::test_readyz_exercises_dependencies`
-
-**Symptom:** `/readyz` returns 503 in tests. The endpoint pings Postgres, Redis, and Kafka producer; one or more is reported "fail" but the `detail` field is being stripped by the global RFC 7807 exception handler so we can't see which.
-
-**Status:** Investigation incomplete. Postgres and Redis pings pass independently in other tests, so Kafka is the most likely failing dependency.
-
-**Production impact:** Cosmetic in tests only. The `/readyz` endpoint logic is correct; this is about the test fixture's lifespan not fully starting the Kafka producer.
-
-**Next steps:** Surface the failing dependency name in the response detail (or via logs). Fix the underlying lifecycle issue.
+- Multi-organization membership visibility, API-key permission scope, and
+  principal isolation for idempotent response replay remain follow-up work.
+- The demo seed address fails login schema validation. Use a valid email
+  address for test users exercising login.

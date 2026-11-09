@@ -6,13 +6,27 @@ See `../../ARCHITECTURE.md` for the full architecture and `../../docs/adr/` for 
 
 ## Quickstart
 
+Install the locked dependencies from `apps/api`.
+
 ```bash
-uv sync
-uv run alembic upgrade head
-EAIP_SEED_DEMO=1 uv run python -m app.scripts.seed
-uv run pytest -v
-uv run uvicorn app.main:app --reload --port 8000
+uv sync --frozen
+EAIP_ENVIRONMENT=test uv run pytest tests/unit --cov-fail-under=0
 ```
+
+Start the local infrastructure and provision separate migration and runtime
+logins before running the API. See the
+[repository quickstart](../../README.md#running-locally) and
+[database role setup](../../docs/database-roles.md).
+
+The integration fixture provisions disposable PostgreSQL, Redis and Redpanda
+services by default. The full suite also needs a disposable S3-compatible
+endpoint with an `eaip-documents` bucket for the document roundtrip. Configure
+`EAIP_MINIO_ENDPOINT_URL`, `EAIP_MINIO_ACCESS_KEY` and `EAIP_MINIO_SECRET_KEY`
+with test-only values, then run `uv run pytest tests/integration` with Docker
+available.
+
+For an external test stack, follow the
+[disposable database contract](../../docs/database-roles.md#integration-tests).
 
 ## Layout
 

@@ -7,6 +7,7 @@ ack so transactional outbox semantics are preserved at the publisher layer
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -19,13 +20,36 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 _producer: AIOKafkaProducer | None = None
+_producer_lock: asyncio.Lock | None = None
+_producer_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _lifecycle_lock() -> asyncio.Lock:
+    global _producer_lock, _producer_loop
+    loop = asyncio.get_running_loop()
+    if _producer_lock is None or _producer_loop is not loop:
+        if _producer is not None or (_producer_lock is not None and _producer_lock.locked()):
+            raise RuntimeError("Kafka producer lifecycle belongs to another event loop")
+        _producer_lock = asyncio.Lock()
+        _producer_loop = loop
+    return _producer_lock
+
+
+async def _stop_producer(producer: AIOKafkaProducer) -> None:
+    try:
+        await producer.stop()
+        logger.info("kafka.producer.stopped")
+    except Exception:
+        logger.warning("kafka.producer.stop_failed")
 
 
 async def get_producer() -> AIOKafkaProducer:
     global _producer
-    if _producer is None:
+    async with _lifecycle_lock():
+        if _producer is not None:
+            return _producer
         settings = get_settings()
-        _producer = AIOKafkaProducer(
+        producer = AIOKafkaProducer(
             bootstrap_servers=settings.kafka.bootstrap_servers,
             client_id=settings.kafka.client_id,
             enable_idempotence=settings.kafka.enable_idempotence,
@@ -35,21 +59,23 @@ async def get_producer() -> AIOKafkaProducer:
             value_serializer=lambda v: json.dumps(v, default=str, separators=(",", ":")).encode(),
             key_serializer=lambda k: k.encode() if isinstance(k, str) else k,
         )
-        await _producer.start()
-        logger.info("kafka.producer.started", servers=settings.kafka.bootstrap_servers)
-    return _producer
+        try:
+            await producer.start()
+        except (Exception, asyncio.CancelledError):
+            await _stop_producer(producer)
+            raise
+        _producer = producer
+        logger.info("kafka.producer.started")
+        return producer
 
 
 async def dispose_producer() -> None:
     """Dispose kafka producer. Best-effort during loop teardown."""
     global _producer
-    if _producer is not None:
-        try:
-            await _producer.stop()
-            logger.info("kafka.producer.stopped")
-        except (RuntimeError, Exception) as e:
-            logger.debug("kafka.producer.dispose_suppressed", error=str(e))
-    _producer = None
+    async with _lifecycle_lock():
+        producer, _producer = _producer, None
+        if producer is not None:
+            await _stop_producer(producer)
 
 
 def _trace_headers() -> list[tuple[str, bytes]]:

@@ -44,7 +44,9 @@ class DatabaseSettings(_Base):
     )
 
     url: SecretStr = Field(
-        default=SecretStr("postgresql+asyncpg://eaip:changeme_local_only@localhost:5432/eaip"),
+        default=SecretStr(
+            "postgresql+asyncpg://eaip_runtime:changeme_runtime_local_only@localhost:5432/eaip"
+        ),
         description="SQLAlchemy async URL — must use the asyncpg driver.",
     )
     pool_size: int = 10

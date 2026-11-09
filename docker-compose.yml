@@ -275,7 +275,9 @@ services:
       - .env
     environment:
       # In-container DNS overrides — keep .env values flat for host-side tooling.
-      EAIP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-eaip}:${POSTGRES_PASSWORD:-changeme_local_only}@postgres:5432/${POSTGRES_DB:-eaip}
+      EAIP_DATABASE_URL: postgresql+asyncpg://eaip_runtime:${POSTGRES_RUNTIME_PASSWORD:-changeme_runtime_local_only}@postgres:5432/${POSTGRES_DB:-eaip}
+      # The bootstrap password is used by Postgres, never by the API.
+      POSTGRES_PASSWORD: ""
       EAIP_REDIS_URL: redis://:${REDIS_PASSWORD:-changeme_local_only}@redis:6379/0
       EAIP_KAFKA_BOOTSTRAP_SERVERS: redpanda:29092
       EAIP_OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317

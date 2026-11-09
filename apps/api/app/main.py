@@ -20,8 +20,8 @@ ASGI applies middleware in reverse-add order, so we add them bottom-up.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +42,9 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_id import RequestIdMiddleware
 from app.middleware.tenant import TenantMiddleware
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -50,22 +53,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_tracing(settings)
     logger = get_logger("app.main")
 
-    # Eagerly initialize backends so startup-time misconfiguration is loud.
-    get_engine()
-    redis_infra.get_redis()
-    await kafka.get_producer()
-    await outbox.start_publisher()
-    logger.info("api.startup.complete", version=__version__, environment=settings.environment.value)
+    # Register teardown before each initializer, including partially failed
+    # startup. Stop the publisher before closing the backends it uses.
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(dispose_engine)
+        get_engine()
+        stack.push_async_callback(redis_infra.dispose_redis)
+        redis_infra.get_redis()
+        stack.push_async_callback(kafka.dispose_producer)
+        await kafka.get_producer()
+        stack.push_async_callback(outbox.stop_publisher)
+        await outbox.start_publisher()
+        logger.info(
+            "api.startup.complete", version=__version__, environment=settings.environment.value
+        )
 
-    try:
-        yield
-    finally:
-        logger.info("api.shutdown.begin")
-        await outbox.stop_publisher()
-        await kafka.dispose_producer()
-        await redis_infra.dispose_redis()
-        await dispose_engine()
-        logger.info("api.shutdown.complete")
+        try:
+            yield
+        finally:
+            logger.info("api.shutdown.begin")
+    logger.info("api.shutdown.complete")
 
 
 def create_app() -> FastAPI:
@@ -77,7 +84,7 @@ def create_app() -> FastAPI:
         version=__version__,
         description=(
             "Multi-tenant AI workflow platform. See ARCHITECTURE.md for context "
-            "and ADRs 0001–0005 for load-bearing decisions."
+            "and ADRs 0001-0005 for load-bearing decisions."
         ),
         openapi_url="/openapi.json",
         docs_url="/docs",

@@ -52,8 +52,11 @@ The pre-commit hook checks the message format. Squash-merge is the default; the 
 
 ## Testing expectations
 
-- Unit tests are colocated with code under `__tests__/` (TS) or `tests/` (Py).
-- Integration tests live under `apps/api/tests/integration/` and run against the Compose stack.
+- API unit tests run without infrastructure from `apps/api` using
+  `EAIP_ENVIRONMENT=test uv run pytest tests/unit --cov-fail-under=0`.
+- API integration tests live in `apps/api/tests/integration/`. See the
+  [API test setup](apps/api/README.md#quickstart) for disposable service and
+  storage requirements.
 - The eval harness lives under `workers/eval-runtime/` (later phase) and runs on a fixed gold set.
 
 ## Reporting security issues
