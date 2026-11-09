@@ -6,5 +6,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
     public.refresh_tokens, public.documents, public.document_chunks
     TO :"runtime_role";
 GRANT SELECT, INSERT, UPDATE ON TABLE public.outbox TO :"runtime_role";
+GRANT SELECT, INSERT ON TABLE public.consumer_inbox TO :"runtime_role";
 -- Use the RLS-protected partitioned parent. Never grant access to its children.
 GRANT SELECT, INSERT ON TABLE public.audit_log TO :"runtime_role";

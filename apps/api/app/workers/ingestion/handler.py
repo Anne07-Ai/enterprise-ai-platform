@@ -6,14 +6,13 @@ Receives one DocumentUploadedV1 payload and:
     3. Extracts text by mime type
     4. Marks status -> chunking
     5. Chunks the text
-    6. Bulk-INSERTs chunks (embedding=NULL, ON CONFLICT skip)
+    6. Bulk-INSERTs chunks (embedding=NULL)
     7. Marks status -> embedding
     8. Emits one DocumentChunkedV1 per chunk via the outbox
 
 Idempotency:
-    The chunks table has UNIQUE (document_id, chunk_index), so re-running
-    is a no-op at the INSERT layer. Status transitions guard re-processing
-    of already-ready documents.
+    A durable inbox receipt deduplicates a committed event. Chunk writes,
+    status changes, and outbox rows share the receipt's transaction.
 
 Failure:
     Any exception in extract/chunk marks the document 'failed' with the
@@ -29,13 +28,15 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text as sql_text
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.infra.consumer_inbox import claim_event, parse_event_id
 
 # Import identity models so SQLAlchemy can resolve the FK from
 # documents.created_by -> users.id and documents.org_id ->
 # organizations.id when the worker only loads rag models.
 from app.modules.identity import models as _identity_models  # noqa: F401
 from app.modules.rag import service as rag_service
-from app.modules.rag.chunker import chunk_text
 from app.modules.rag.events import (
     DocumentChunkedV1,
     DocumentFailedV1,
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
     from app.modules.rag.storage import DocumentStorage
 
 logger = logging.getLogger(__name__)
+CONSUMER = "ingestion-worker"
 
 
 # Status values from which it's safe to (re-)start ingestion. If the
@@ -75,6 +77,7 @@ async def handle_document_uploaded(
     commit. This function does its work inside the caller's transaction
     so the chunk INSERTs and outbox writes commit atomically.
     """
+    event_id = parse_event_id(event_payload.get("event_id"))
     org_id = uuid.UUID(event_payload["org_id"])
     document_id = uuid.UUID(event_payload["document_id"])
     storage_uri = event_payload["storage_uri"]
@@ -85,6 +88,8 @@ async def handle_document_uploaded(
         sql_text("SELECT set_config('app.current_org', :org, true)"),
         {"org": str(org_id)},
     )
+    if not await claim_event(session, org_id=org_id, consumer=CONSUMER, event_id=event_id):
+        return
 
     doc = await rag_service.get_document(session, document_id=document_id)
     if doc is None:
@@ -105,14 +110,19 @@ async def handle_document_uploaded(
         return
 
     try:
-        await _do_ingest(
-            session,
-            storage,
-            org_id=org_id,
-            document_id=document_id,
-            storage_uri=storage_uri,
-            mime_type=mime_type,
-        )
+        # Keep partial business writes out of a committed failure result.
+        async with session.begin_nested():
+            await _do_ingest(
+                session,
+                storage,
+                org_id=org_id,
+                document_id=document_id,
+                storage_uri=storage_uri,
+                mime_type=mime_type,
+            )
+    except SQLAlchemyError:
+        # A database failure must roll back the receipt for replay.
+        raise
     except Exception as exc:
         # Mark failed + emit failure event. We swallow the exception so
         # the Kafka consumer can commit the offset — this isn't a
@@ -163,6 +173,8 @@ async def _do_ingest(
 
     # ---- 2. chunk ----------------------------------------------------------
     await rag_service.mark_status(session, document_id=document_id, status=DocumentStatus.CHUNKING)
+    from app.modules.rag.chunker import chunk_text
+
     chunks = chunk_text(text_content)
     if not chunks:
         raise RuntimeError("chunker produced zero chunks from non-empty text")

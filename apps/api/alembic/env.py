@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING
 
 from alembic import context
 from app.core.config import get_settings
-from app.infra.db import Base
 
 # Import models so target_metadata is fully populated for autogenerate.
+from app.infra import consumer_inbox  # noqa: F401  (registers ORM mapper)
+from app.infra.db import Base
 from app.modules.identity import models  # noqa: F401  (registers ORM mappers)
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config

@@ -30,13 +30,14 @@ def worker_io(worker: ModuleType, monkeypatch: pytest.MonkeyPatch) -> SimpleName
         getmany=AsyncMock(),
         commit=AsyncMock(),
         stop=AsyncMock(),
+        stop_offset_commits=AsyncMock(),
         embedder_close=AsyncMock(),
         outbox_stop=AsyncMock(),
         producer_close=AsyncMock(),
         engine_close=AsyncMock(),
         process=AsyncMock(),
     )
-    monkeypatch.setattr(worker, "AIOKafkaConsumer", lambda *args, **kwargs: io)
+    monkeypatch.setattr(worker, "OffsetOwnedConsumer", lambda *args, **kwargs: io)
     monkeypatch.setattr(worker.kafka_infra, "get_producer", AsyncMock())
     monkeypatch.setattr(worker.kafka_infra, "dispose_producer", io.producer_close)
     monkeypatch.setattr(worker.outbox_infra, "start_publisher", AsyncMock())

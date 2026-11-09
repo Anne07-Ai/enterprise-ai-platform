@@ -7,7 +7,7 @@ import gc
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -15,7 +15,7 @@ from aiokafka import TopicPartition
 from aiokafka.errors import ProducerClosed
 from aiokafka.producer.sender import Sender
 from app.core.config import KafkaSettings, get_settings
-from app.infra import outbox
+from app.infra import kafka_shutdown, outbox
 from app.infra.kafka_shutdown import ShutdownProducer, stop_consumer
 from pydantic import ValidationError
 
@@ -139,6 +139,7 @@ async def test_consumer_stop_still_closes_local_tasks_and_transport(stop_mode: s
 
     consumer = SimpleNamespace(
         stop=AsyncMock(side_effect=stop),
+        stop_offset_commits=AsyncMock(),
         _coordinator=SimpleNamespace(
             _coordination_task=tasks[0], _heartbeat_task=tasks[1], _commit_refresh_task=tasks[2]
         ),
@@ -157,6 +158,7 @@ async def test_consumer_stop_still_closes_local_tasks_and_transport(stop_mode: s
                     await shutdown
             else:
                 await shutdown
+        consumer.stop_offset_commits.assert_awaited_once()
         assert all(task.cancelled() for task in tasks)
         consumer._fetcher.close.assert_not_awaited()
         consumer._client.close.assert_awaited_once()
@@ -200,3 +202,15 @@ async def test_cancelling_stop_caller_does_not_interrupt_publisher_rollback(
 
     assert rolled_back.is_set()
     assert outbox._PUBLISHER_TASK is None
+
+
+async def test_transport_close_starts_even_when_metadata_join_stalls() -> None:
+    async def stalled_close() -> None:
+        await asyncio.Event().wait()
+
+    connection = Mock()
+    client = SimpleNamespace(close=stalled_close, _conns={"connection": connection})
+    async with asyncio.timeout(1):
+        with pytest.raises(TimeoutError):
+            await kafka_shutdown._close_client(client)
+    connection.close.assert_called_once()

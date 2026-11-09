@@ -33,20 +33,21 @@ import asyncio
 import json
 import signal
 import sys
-from contextlib import AsyncExitStack
-from typing import Any
-
-from aiokafka import AIOKafkaConsumer
+from typing import TYPE_CHECKING, Any
 
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
 from app.infra import kafka as kafka_infra
 from app.infra import outbox as outbox_infra
 from app.infra.db import dispose_engine, get_sessionmaker
+from app.infra.kafka_offsets import OffsetOwnedConsumer
 from app.infra.kafka_shutdown import stop_consumer
 from app.modules.rag.events import DocumentUploadedV1
 from app.modules.rag.storage import get_storage
 from app.workers import run_until_stopped
+
+if TYPE_CHECKING:
+    from contextlib import AsyncExitStack
 
 logger = get_logger(__name__)
 
@@ -65,10 +66,7 @@ async def _process_one(record_value: dict[str, Any]) -> None:
 
 
 async def run(stop_event: asyncio.Event) -> None:
-    # The signal deadline cancels startup or processing. Cleanup runs after
-    # the child task has finished unwinding its current DB transaction.
-    async with AsyncExitStack() as stack:
-        await run_until_stopped(_consume(stop_event, stack), stop_event)
+    await run_until_stopped(_consume, stop_event)
 
 
 async def _consume(stop_event: asyncio.Event, stack: AsyncExitStack) -> None:
@@ -79,10 +77,12 @@ async def _consume(stop_event: asyncio.Event, stack: AsyncExitStack) -> None:
     stack.push_async_callback(dispose_engine)
     stack.push_async_callback(kafka_infra.dispose_producer)
     await kafka_infra.get_producer()
+    if stop_event.is_set():
+        return
     stack.push_async_callback(outbox_infra.stop_publisher)
     await outbox_infra.start_publisher()
 
-    consumer = AIOKafkaConsumer(
+    consumer = OffsetOwnedConsumer(
         DocumentUploadedV1.TOPIC,
         bootstrap_servers=settings.kafka.bootstrap_servers,
         group_id=CONSUMER_GROUP,

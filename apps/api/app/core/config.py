@@ -88,6 +88,7 @@ class KafkaSettings(_Base):
     enable_idempotence: bool = True
     shutdown_grace_seconds: float = Field(default=5.0, gt=0, allow_inf_nan=False)
     shutdown_cleanup_seconds: float = Field(default=2.0, gt=0, allow_inf_nan=False)
+    worker_shutdown_timeout_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
 
 
 class AuthSettings(_Base):
