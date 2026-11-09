@@ -57,6 +57,40 @@ actual process exit in a disposable outage drill. The application budget
 depends on the event loop getting scheduled and on dependency code
 responding to cancellation or transport closure.
 
+### Kubernetes supervision profile
+
+Start target-environment rehearsal with the default 10-second worker
+budget and a 30-second pod `terminationGracePeriodSeconds`. Leave
+`preStop` unset for workers. If the deployment needs a lifecycle hook
+or changes the application budget, allow time for that hook, the worker
+budget, and an observed margin for signal delivery and process exit.
+Validate the resulting deadline under load before rollout.
+
+Set the container's `command` to `["/opt/venv/bin/python"]` and
+its `args` to `["-m", "app.workers.embedding"]`. Launch ingestion
+separately with `app.workers.ingestion` as its module. Setting both fields
+replaces the API image's Uvicorn command and arguments and makes Python the
+container process that receives SIGTERM. Verify the command and environment
+in the built worker image. Let the workload controller replace terminated
+pods and use container restart with backoff for worker failures. Keep
+consumer groups stable so replacement workers use the broker's stored offsets.
+
+In a disposable rehearsal, measure cooperative SIGTERM and supervisor
+escalation separately. For the backstop case, verify that an in-flight
+operation remains stalled after SIGTERM, then record the supervisor's
+forced termination reason and actual process exit. A forced kill skips
+application cleanup. After dependencies recover, inspect the broker's
+committed offset, confirm PostgreSQL released any transaction locks,
+and verify pending outbox delivery and replay with the same event ID.
+Allow for rollback to finish after PostgreSQL can process the lost
+connection. A signal-related exit code alone does not distinguish
+deadline escalation from an out-of-memory kill.
+
+Repeat both cases on the intended Kubernetes runner with the built
+image, configured grace period, and target dependency topology.
+Local subprocess drills establish the tested process and replay
+behavior. The target supervisor remains a separate release gate.
+
 ## Delivery and replay
 
 The application writes business state and its outbox row in the same

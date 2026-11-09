@@ -1,10 +1,12 @@
 """HTTP surface of the identity module."""
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Request, status
+from fastapi import APIRouter, Depends, Header, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentPrincipalDep, DBSession, UnscopedDBSession
+from app.core.deps import CurrentPrincipalDep, DBSession, UnscopedDBSession, get_db
 from app.core.errors import AuthenticationError, AuthorizationError
 from app.modules.identity import service
 from app.modules.identity.rbac import OrgRole, require_permission
@@ -272,11 +274,11 @@ async def remove_member(
 )
 async def create_api_key(
     payload: ApiKeyCreate,
-    db: DBSession,
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
     principal: CurrentPrincipalDep,
     x_test_key: str | None = Header(default=None, alias="X-Test-Key"),
 ) -> ApiKeyCreateOut:
-    if principal.user_id is None:
+    if principal.kind != "user" or principal.user_id is None:
         raise AuthorizationError("API keys cannot create more API keys.")
     org = await service.get_org(db, org_id=principal.org_id)
     key, plaintext = await service.create_api_key_for_org(
@@ -310,7 +312,7 @@ async def list_api_keys(db: DBSession, principal: CurrentPrincipalDep) -> list[A
     dependencies=[require_permission("api_keys:revoke")],
 )
 async def revoke_api_key(key_id: UUID, db: DBSession, principal: CurrentPrincipalDep) -> None:
-    if principal.user_id is None:
+    if principal.kind != "user" or principal.user_id is None:
         raise AuthorizationError("API keys cannot revoke other API keys.")
     await service.revoke_api_key(
         db, org_id=principal.org_id, key_id=key_id, actor_user_id=principal.user_id

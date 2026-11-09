@@ -91,6 +91,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     role="member",  # API keys default to member-level role; scopes drive checks.
                     scopes=tuple(key.scopes) if key.scopes else (),
                     kind="api_key",
+                    api_key_id=key.id,
                 )
 
         raise AuthenticationError("Authentication required.")

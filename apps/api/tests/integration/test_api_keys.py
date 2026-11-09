@@ -57,3 +57,30 @@ async def test_api_key_can_authenticate_then_revoke(client: AsyncClient) -> None
 
     after = await client.get("/v1/api-keys", headers={"X-Api-Key": plaintext})
     assert after.status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["create", "revoke"])
+async def test_attributed_key_cannot_manage_credentials(client: AsyncClient, action: str) -> None:
+    await make_user_and_org()
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
+    owner = {**auth_headers(token), "X-Test-Key": "1"}
+    issued = await client.post(
+        "/v1/api-keys",
+        json={"name": "delegated", "scopes": [f"api_keys:{action}"]},
+        headers=owner,
+    )
+    assert issued.status_code == 201
+    key = issued.json()
+    delegated = {"X-Api-Key": key["plaintext"]}
+
+    if action == "create":
+        denied = await client.post(
+            "/v1/api-keys", json={"name": "escalated", "scopes": ["*"]}, headers=delegated
+        )
+    else:
+        denied = await client.delete(f"/v1/api-keys/{key['id']}", headers=delegated)
+    assert denied.status_code == 403
+    listed = await client.get("/v1/api-keys", headers=owner)
+    assert listed.status_code == 200
+    assert [(item["id"], item["status"]) for item in listed.json()] == [(key["id"], "active")]
