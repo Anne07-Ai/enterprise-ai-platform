@@ -22,7 +22,7 @@ from app.infra.db import session_for_request, session_unscoped
 class CurrentPrincipal:
     """Carries the authenticated principal for a request (user or API key)."""
 
-    __slots__ = ("jti", "kind", "org_id", "role", "scopes", "user_id")
+    __slots__ = ("api_key_id", "jti", "kind", "org_id", "role", "scopes", "user_id")
 
     def __init__(
         self,
@@ -33,6 +33,7 @@ class CurrentPrincipal:
         scopes: tuple[str, ...] = (),
         kind: str = "user",
         jti: str | None = None,
+        api_key_id: UUID | None = None,
     ) -> None:
         self.user_id = user_id
         self.org_id = org_id
@@ -40,6 +41,7 @@ class CurrentPrincipal:
         self.scopes = scopes
         self.kind = kind
         self.jti = jti
+        self.api_key_id = api_key_id
 
 
 def get_current_principal(request: Request) -> CurrentPrincipal:
