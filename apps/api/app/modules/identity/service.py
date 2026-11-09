@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import (
@@ -50,20 +51,28 @@ async def create_org(
     creator_user_id: UUID,
     is_test: bool = False,
 ) -> Organization:
-    org = await repo.create_org(session, slug=slug, name=name, is_test=is_test)
-    await repo.create_membership(
-        session, org_id=org.id, user_id=creator_user_id, role=OrgRole.OWNER.value
-    )
-    await events.emit_audit(
-        session,
-        org_id=org.id,
-        actor_user_id=creator_user_id,
-        actor_kind="user",
-        action="org.created",
-        target_type="org",
-        target_id=str(org.id),
-        attributes={"slug": slug, "name": name},
-    )
+    # Keep bootstrap atomic even when a caller handles the error and continues
+    # its transaction. A savepoint rollback also restores the previous GUC.
+    async with session.begin_nested():
+        org = await repo.create_org(session, slug=slug, name=name, is_test=is_test)
+        previous_org = await session.scalar(text("SELECT current_setting('app.current_org', true)"))
+        # Only the UUID allocated by this INSERT may replace the request scope.
+        set_org = text("SELECT set_config('app.current_org', :org, true)")
+        await session.execute(set_org, {"org": str(org.id)})
+        await repo.create_membership(
+            session, org_id=org.id, user_id=creator_user_id, role=OrgRole.OWNER.value
+        )
+        await events.emit_audit(
+            session,
+            org_id=org.id,
+            actor_user_id=creator_user_id,
+            actor_kind="user",
+            action="org.created",
+            target_type="org",
+            target_id=str(org.id),
+            attributes={"slug": slug, "name": name},
+        )
+        await session.execute(set_org, {"org": previous_org or ""})
     return org
 
 

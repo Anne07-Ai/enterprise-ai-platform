@@ -129,7 +129,7 @@ async def me(principal: CurrentPrincipalDep, db: DBSession) -> MeOut:
 async def create_org(
     payload: OrganizationCreate, db: DBSession, principal: CurrentPrincipalDep
 ) -> OrganizationOut:
-    if principal.user_id is None:
+    if principal.kind != "user" or principal.user_id is None:
         raise AuthorizationError("API keys cannot create organizations.")
     org = await service.create_org(
         db,

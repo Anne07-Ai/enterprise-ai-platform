@@ -18,21 +18,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: eaip
-          POSTGRES_PASSWORD: eaip
-          POSTGRES_DB: eaip
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     defaults:
       run:
         working-directory: apps/api
@@ -64,32 +49,20 @@ jobs:
 
       - name: Lint (ruff)
         run: uv run ruff check .
-        continue-on-error: true
-
-      - name: Format check (ruff format --check)
-        run: uv run ruff format --check .
-        continue-on-error: true
+        continue-on-error: true # Existing lint findings tracked in KNOWN_ISSUES.md.
 
       - name: Type check (mypy)
         run: uv run mypy app
         continue-on-error: true
-        # mypy on a large codebase is noisy on first introduction;
-        # we run it but don't block CI on it yet. Remove
-        # continue-on-error once the type baseline is clean.
+        # Existing strict typing findings tracked in KNOWN_ISSUES.md.
 
       - name: Unit tests
         env:
-          # Required so pydantic-settings doesn't choke on missing values
-          # during module import for the unit test path.
-          EAIP_ENVIRONMENT: local
-          EAIP_OPENAI_API_KEY: "sk-test-not-real"
-          EAIP_ANTHROPIC_API_KEY: "sk-ant-test-not-real"
-          EAIP_SKIP_CONTAINERS: "1"
-          EAIP_DATABASE_URL: "postgresql+asyncpg://eaip:eaip@localhost:5432/eaip"
+          EAIP_ENVIRONMENT: test
         run: uv run pytest tests/unit -v --cov-fail-under=0
 
-  # Integration tests are not in CI yet. They require Postgres+pgvector,
-  # MinIO, Redpanda, and outbound network for OpenAI/Anthropic, and have
-  # two known-failing tests documented in KNOWN_ISSUES.md. They run on
-  # the dev box via `make test-integration`. When the failing tests are
-  # fixed and the LLM mocks are in place, this job will be added.
+      - name: Format check (ruff format --check)
+        run: uv run ruff format --check .
+
+  # Integration fixtures provision services and apply migrations. See
+  # KNOWN_ISSUES.md for the status of adding those tests to CI.

@@ -47,7 +47,10 @@ class TestJWT:
 
     def test_tampered_token_rejected(self) -> None:
         token, _, _ = mint_access_token(user_id=uuid4(), org_id=uuid4(), role="member")
-        broken = token[:-2] + ("AB" if token[-2:] != "AB" else "CD")
+        header, payload, signature = token.split(".")
+        # The first character always carries signature bits, unlike the padded tail.
+        replacement = "B" if signature[0] == "A" else "A"
+        broken = f"{header}.{payload}.{replacement}{signature[1:]}"
         with pytest.raises(AuthenticationError):
             verify_access_token(broken)
 

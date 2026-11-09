@@ -7,15 +7,22 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from app import __version__
+from app.core.logging import get_logger
 from app.infra import db, kafka
 from app.infra import redis as redis_infra
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
 router = APIRouter(tags=["system"])
+logger = get_logger(__name__)
+_PROBE_TIMEOUT_SECONDS = 2.0
 
 
 class HealthOut(BaseModel):
@@ -42,23 +49,26 @@ async def healthz() -> HealthOut:
     },
 )
 async def readyz() -> ReadyOut:
-    async def _check(name: str, coro: object) -> tuple[str, str]:
+    async def _check(name: str, ping: Callable[[], Awaitable[None]]) -> tuple[str, str]:
         try:
-            await asyncio.wait_for(coro, timeout=2.0)  # type: ignore[arg-type]
+            await asyncio.wait_for(ping(), timeout=_PROBE_TIMEOUT_SECONDS)
             return name, "ok"
         except Exception as exc:
-            return name, f"fail: {type(exc).__name__}"
+            reason = "timeout" if isinstance(exc, TimeoutError) else "unavailable"
+            logger.warning("readiness.check.failed", dependency=name, reason=reason)
+            return name, "fail"
 
     results = await asyncio.gather(
-        _check("postgres", db.ping()),
-        _check("redis", redis_infra.ping()),
-        _check("kafka", kafka.ping()),
+        _check("postgres", db.ping),
+        _check("redis", redis_infra.ping),
+        _check("kafka", kafka.ping),
     )
-    checks = dict(results)
-    overall = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
-    if overall != "ok":
-        # Surface the failure as 503 so orchestrators stop sending traffic.
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=503, detail=checks)
-    return ReadyOut(status=overall, checks=checks)
+    failed = [name for name, result in results if result == "fail"]
+    if failed:
+        # The problem-details handler only preserves string details. Use the
+        # fixed dependency names and never include upstream exception text.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Unavailable dependencies: {', '.join(failed)}.",
+        )
+    return ReadyOut(status="ok", checks=dict(results))
