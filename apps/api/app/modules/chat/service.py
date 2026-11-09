@@ -23,9 +23,16 @@ Session policy:
 from __future__ import annotations
 
 import logging
-import uuid
+from typing import TYPE_CHECKING
 
-from sqlalchemy.ext.asyncio import async_sessionmaker
+if TYPE_CHECKING:
+    import uuid
+    from collections.abc import AsyncIterator
+
+    from anthropic.types import MessageParam
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from app.modules.chat.sse import Event
 
 from app.modules.chat.agent import run as agent_run
 from app.modules.chat.schemas import ChatCitation, ChatRequest, ChatResponse
@@ -34,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_chat(
-    session_maker: async_sessionmaker,
+    session_maker: async_sessionmaker[AsyncSession],
     *,
     org_id: uuid.UUID,
     request: ChatRequest,
@@ -51,7 +58,7 @@ async def handle_chat(
     appropriate status codes (5xx for upstream LLM failures, 5xx for
     DB failures, etc.).
     """
-    history = [{"role": m.role, "content": m.content} for m in request.history]
+    history: list[MessageParam] = [{"role": m.role, "content": m.content} for m in request.history]
 
     async with session_maker() as session, session.begin():
         result = await agent_run(
@@ -89,11 +96,11 @@ async def handle_chat(
 
 
 async def handle_chat_stream(
-    session_maker,
+    session_maker: async_sessionmaker[AsyncSession],
     *,
-    org_id,
+    org_id: uuid.UUID,
     request: ChatRequest,
-):
+) -> AsyncIterator[Event]:
     """Streaming variant of handle_chat.
 
     Yields :class:`app.modules.chat.sse.Event` instances. The API layer
@@ -107,7 +114,7 @@ async def handle_chat_stream(
     from app.modules.chat.agent import run_streaming
     from app.modules.chat.sse import DoneEvent, ErrorEvent
 
-    history = [{"role": m.role, "content": m.content} for m in request.history]
+    history: list[MessageParam] = [{"role": m.role, "content": m.content} for m in request.history]
 
     async with session_maker() as session, session.begin():
         try:

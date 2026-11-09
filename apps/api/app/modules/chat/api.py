@@ -14,17 +14,18 @@ Status codes:
     500 — anything else (DB, internal bug)
 """
 
-from __future__ import annotations
-
 import logging
+from collections.abc import AsyncIterator
 
 import anthropic
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from app.core.deps import CurrentPrincipalDep
 from app.infra.db import get_sessionmaker
 from app.modules.chat.schemas import ChatRequest, ChatResponse
-from app.modules.chat.service import handle_chat
+from app.modules.chat.service import handle_chat, handle_chat_stream
+from app.modules.chat.sse import DoneEvent, ErrorEvent, format_event
 from app.modules.identity.rbac import require_permission
 
 logger = logging.getLogger(__name__)
@@ -99,16 +100,6 @@ async def post_chat(
 # ---------------------------------------------------------------------------
 
 
-from fastapi.responses import StreamingResponse  # noqa: E402
-
-from app.modules.chat.service import handle_chat_stream  # noqa: E402
-from app.modules.chat.sse import (  # noqa: E402
-    DoneEvent,
-    ErrorEvent,
-    format_event,
-)
-
-
 @router.post(
     "/stream",
     status_code=status.HTTP_200_OK,
@@ -123,7 +114,7 @@ from app.modules.chat.sse import (  # noqa: E402
 async def post_chat_stream(
     payload: ChatRequest,
     principal: CurrentPrincipalDep,
-):
+) -> StreamingResponse:
     """Stream the agent's progress as server-sent events.
 
     Returns text/event-stream. Events emitted (named):
@@ -146,7 +137,7 @@ async def post_chat_stream(
 
     sm = get_sessionmaker()
 
-    async def _gen():
+    async def _gen() -> AsyncIterator[str]:
         # We deliberately do NOT wrap LLM/network errors here. Service
         # layer yields ErrorEvent + DoneEvent on failure so the client
         # sees a clean terminal event rather than a torn connection.

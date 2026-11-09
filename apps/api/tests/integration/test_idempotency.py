@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
-from httpx import AsyncClient
+from typing import TYPE_CHECKING
 
-from tests.integration._helpers import auth_headers, login, make_user_and_org
+import pytest
+
+from tests.integration._helpers import TEST_PASSWORD, auth_headers, login, make_user_and_org
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
 
 pytestmark = pytest.mark.integration
 
@@ -13,7 +17,7 @@ pytestmark = pytest.mark.integration
 @pytest.mark.asyncio
 async def test_same_key_same_body_returns_cached(client: AsyncClient) -> None:
     await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
 
     headers = {**auth_headers(token), "Idempotency-Key": "test-key-1", "X-Test-Key": "1"}
     body = {"name": "k1", "scopes": ["org:read"]}
@@ -28,7 +32,7 @@ async def test_same_key_same_body_returns_cached(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_same_key_different_body_returns_conflict(client: AsyncClient) -> None:
     await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
 
     headers = {**auth_headers(token), "Idempotency-Key": "test-key-2", "X-Test-Key": "1"}
     await client.post("/v1/api-keys", json={"name": "first", "scopes": []}, headers=headers)
@@ -42,7 +46,7 @@ async def test_same_key_different_body_returns_conflict(client: AsyncClient) -> 
 @pytest.mark.asyncio
 async def test_different_keys_execute_fresh(client: AsyncClient) -> None:
     await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
 
     base_headers = {**auth_headers(token), "X-Test-Key": "1"}
     r1 = await client.post(

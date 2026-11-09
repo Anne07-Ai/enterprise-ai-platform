@@ -11,20 +11,37 @@ allowed plus the seconds until the next token would be available.
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING, Protocol, cast
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import Response
 
 from app.core.config import get_settings
 from app.core.errors import RateLimitedError, domain_error_handler
 from app.infra.redis import get_redis
 from app.middleware.auth import PUBLIC_PATHS, _is_public
 
+if TYPE_CHECKING:
+    from starlette.requests import Request
+    from starlette.responses import Response
+    from starlette.types import ASGIApp
+
+    from app.core.config import RateLimitSettings
+
+
+class _RateLimitRedis(Protocol):
+    # The rate-limit Lua script returns two RESP integers. The Redis stubs
+    # leave these async scripting methods untyped.
+    async def script_load(self, script: str) -> str: ...
+
+    async def evalsha(
+        self, sha: str, numkeys: int, *keys_and_args: str | int | float
+    ) -> list[int]: ...
+
+
 # KEYS[1] = bucket key
 # ARGV[1] = capacity, ARGV[2] = refill_rate_per_s, ARGV[3] = now_ms, ARGV[4] = ttl
 # Returns: {allowed (0/1), retry_after_ms}
-_LUA_TOKEN_BUCKET = """
+_RATE_LIMIT_SCRIPT = """
 local tokens_key = KEYS[1] .. ":t"
 local ts_key     = KEYS[1] .. ":s"
 local capacity   = tonumber(ARGV[1])
@@ -57,7 +74,7 @@ return {allowed, retry_ms}
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: object) -> None:
+    def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
         self._script_sha: str | None = None
 
@@ -72,25 +89,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await domain_error_handler(request, exc)
         return await call_next(request)
 
-    async def _enforce(self, request: Request, s: object) -> None:  # type: ignore[no-untyped-def]
+    async def _enforce(self, request: Request, s: RateLimitSettings) -> None:
         # Bypass if request hasn't been authenticated yet (e.g. /v1/auth/login).
         org_id = getattr(request.state, "org_id", None)
         ip = request.client.host if request.client else "unknown"
 
-        redis = get_redis()
+        redis = cast("_RateLimitRedis", get_redis())
         if self._script_sha is None:
-            self._script_sha = await redis.script_load(_LUA_TOKEN_BUCKET)
+            self._script_sha = await redis.script_load(_RATE_LIMIT_SCRIPT)
 
         now_ms = int(time.time() * 1000)
-        ttl = max(60_000, int(s.per_org_burst / max(s.per_org_rps, 1) * 2_000))  # type: ignore[attr-defined]
+        ttl = max(60_000, int(s.per_org_burst / max(s.per_org_rps, 1) * 2_000))
 
         # Per-IP bucket (always).
         result = await redis.evalsha(
             self._script_sha,
             1,
-            f"{s.redis_key_prefix}:ip:{ip}",  # type: ignore[attr-defined]
-            s.per_ip_burst,  # type: ignore[attr-defined]
-            s.per_ip_rps,  # type: ignore[attr-defined]
+            f"{s.redis_key_prefix}:ip:{ip}",
+            s.per_ip_burst,
+            s.per_ip_rps,
             now_ms,
             ttl,
         )
@@ -105,9 +122,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             result = await redis.evalsha(
                 self._script_sha,
                 1,
-                f"{s.redis_key_prefix}:org:{org_id}",  # type: ignore[attr-defined]
-                s.per_org_burst,  # type: ignore[attr-defined]
-                s.per_org_rps,  # type: ignore[attr-defined]
+                f"{s.redis_key_prefix}:org:{org_id}",
+                s.per_org_burst,
+                s.per_org_rps,
                 now_ms,
                 ttl,
             )

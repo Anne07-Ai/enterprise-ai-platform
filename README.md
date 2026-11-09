@@ -133,6 +133,10 @@ cd apps/api && set -a; source ../../.env; set +a
 uv run uvicorn app.main:app --port 8000
 ```
 
+Restart a local worker if it exits after a processing or offset commit
+failure. Production workers need supervised restart and a termination
+deadline. See [Kafka delivery limits](KNOWN_ISSUES.md#kafka-delivery).
+
 The demo seed creates a local fixture. See the
 [login validation issue](KNOWN_ISSUES.md#identity-caveats) before using
 it for an HTTP login test.

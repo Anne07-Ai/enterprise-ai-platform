@@ -202,7 +202,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 def install_exception_handlers(app: FastAPI) -> None:
-    app.add_exception_handler(DomainError, domain_error_handler)  # type: ignore[arg-type]
-    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
+    app.exception_handler(DomainError)(domain_error_handler)
+    app.exception_handler(StarletteHTTPException)(http_exception_handler)
+    app.exception_handler(RequestValidationError)(validation_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

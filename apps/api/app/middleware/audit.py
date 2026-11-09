@@ -16,16 +16,20 @@ envelope.
 from __future__ import annotations
 
 import time
-from uuid import UUID
+from typing import TYPE_CHECKING
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import Response
 
 from app.core.logging import get_logger
 from app.infra.db import session_for_request
 from app.middleware.auth import PUBLIC_PATHS, _is_public
 from app.modules.identity.events import emit_audit
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from starlette.requests import Request
+    from starlette.responses import Response
 
 logger = get_logger(__name__)
 

@@ -7,13 +7,16 @@ and emits the same value on the response so clients can correlate.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import Response
 
 from app.core.logging import bind_request_context, clear_request_context
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
+    from starlette.responses import Response
 
 HEADER = "X-Request-Id"
 

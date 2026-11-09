@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Awaitable, Callable
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -18,7 +17,10 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 
-from app.core.config import Settings
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from app.core.config import Settings
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -49,7 +51,8 @@ def setup_tracing(settings: Settings) -> None:
     # in main.py because it needs the app instance.
     HTTPXClientInstrumentor().instrument()
     RedisInstrumentor().instrument()
-    AsyncPGInstrumentor().instrument()
+    asyncpg_instrumentor: Callable[[], AsyncPGInstrumentor] = AsyncPGInstrumentor
+    asyncpg_instrumentor().instrument()
     # SQLAlchemy is instrumented when the engine is created in app.infra.db.
 
 

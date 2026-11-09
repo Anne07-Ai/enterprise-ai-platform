@@ -28,19 +28,22 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text as sql_text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 # Import identity models so SQLAlchemy can resolve cross-table FKs
 # when the worker only loads rag models.
 from app.modules.identity import models as _identity_models  # noqa: F401
 from app.modules.rag import service as rag_service
-from app.modules.rag.embeddings import EmbeddingProvider
 from app.modules.rag.events import DocumentReadyV1
 from app.modules.rag.events_outbox import emit_document_ready
 from app.modules.rag.models import DocumentStatus
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.modules.rag.embeddings import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 

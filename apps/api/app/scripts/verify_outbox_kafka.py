@@ -9,23 +9,19 @@ Runs against the live dev stack (make up). End-to-end:
     4. Trigger the publisher to flush.
     5. Subscribe to document.uploaded.v1 with a fresh consumer group
        and a 15-second timeout.
-    6. Assert exactly one event arrived for our document_id, print it,
+    6. Validate a received event for our document_id, print it,
        exit 0.
 
-Run: uv run python scripts/verify_outbox_kafka.py
+Run from apps/api: uv run python -m app.scripts.verify_outbox_kafka
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import sys
 import uuid
+from contextlib import AsyncExitStack
 from datetime import datetime
-from pathlib import Path
-
-# Ensure we can import the app when invoked from apps/api.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from aiokafka import AIOKafkaConsumer
 from sqlalchemy import text
@@ -33,10 +29,11 @@ from sqlalchemy import text
 from app.core.config import get_settings
 from app.infra import kafka as kafka_infra
 from app.infra import outbox as outbox_infra
-from app.infra.db import get_sessionmaker
+from app.infra.db import dispose_engine, get_sessionmaker
 from app.modules.identity.models import Membership, Organization, User
 from app.modules.identity.security import hash_password
 from app.modules.rag import service as rag_service
+from app.modules.rag.events import DocumentUploadedV1
 from app.modules.rag.events_outbox import emit_document_uploaded
 from app.modules.rag.storage import get_storage
 
@@ -83,50 +80,42 @@ async def _create_doc_in_outbox(org_id: uuid.UUID, user_id: uuid.UUID) -> uuid.U
         return doc.id
 
 
-async def _consume_one(topic: str, document_id: uuid.UUID, timeout: float) -> dict:
+async def _consume_one(document_id: uuid.UUID) -> DocumentUploadedV1:
     """Consume from `topic` until we see an event for our document_id or timeout."""
     settings = get_settings()
     group = f"verify-outbox-{uuid.uuid4().hex[:8]}"
     consumer = AIOKafkaConsumer(
-        topic,
+        DocumentUploadedV1.TOPIC,
         bootstrap_servers=settings.kafka.bootstrap_servers,
         group_id=group,
         auto_offset_reset="earliest",
         enable_auto_commit=False,
-        value_deserializer=lambda v: json.loads(v.decode()),
     )
-    await consumer.start()
     try:
-        deadline = asyncio.get_event_loop().time() + timeout
-        while True:
-            remaining = deadline - asyncio.get_event_loop().time()
-            if remaining <= 0:
-                raise TimeoutError(f"no event for document_id {document_id} after {timeout}s")
-            try:
-                batch = await asyncio.wait_for(
-                    consumer.getmany(timeout_ms=500, max_records=10), timeout=remaining
-                )
-            except TimeoutError:
-                continue
-            for _tp, records in batch.items():
-                for record in records:
-                    payload = record.value
-                    if payload.get("document_id") == str(document_id):
-                        return payload
+        async with asyncio.timeout(15):
+            await consumer.start()
+            async for record in consumer:
+                payload: object = json.loads(record.value)
+                if isinstance(payload, dict) and payload.get("document_id") == str(document_id):
+                    return DocumentUploadedV1.model_validate(payload)
     finally:
         await consumer.stop()
+
+    raise RuntimeError("consumer stopped before the verification event arrived")
 
 
 async def main() -> int:
     print("=== outbox -> Kafka verification ===")
     print(f"started: {datetime.now().isoformat(timespec='seconds')}")
 
-    # --- boot producer + publisher loop ----------------------------------
-    await kafka_infra.get_producer()
-    await outbox_infra.start_publisher()
-    print("kafka.producer + outbox.publisher started")
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(dispose_engine)
+        stack.push_async_callback(kafka_infra.dispose_producer)
+        await kafka_infra.get_producer()
+        stack.push_async_callback(outbox_infra.stop_publisher)
+        await outbox_infra.start_publisher()
+        print("kafka.producer + outbox.publisher started")
 
-    try:
         # --- create org, user, document, outbox row ----------------------
         org_id, user_id = await _seed_org_user()
         print(f"seeded: org_id={org_id}, user_id={user_id}")
@@ -134,22 +123,13 @@ async def main() -> int:
         document_id = await _create_doc_in_outbox(org_id, user_id)
         print(f"created: document_id={document_id}, outbox row written")
 
-        # The publisher loop polls every settings.outbox.poll_interval_ms.
-        # Give it a small head start to flush.
-        await asyncio.sleep(1.0)
-
-        # --- consume the event -------------------------------------------
         print("consuming topic 'document.uploaded.v1' (timeout 15s)...")
-        payload = await _consume_one("document.uploaded.v1", document_id, timeout=15.0)
+        payload = await _consume_one(document_id)
 
         print()
         print("OK: event arrived on Kafka")
-        print(json.dumps(payload, indent=2))
+        print(payload.model_dump_json(indent=2))
         return 0
-
-    finally:
-        await outbox_infra.stop_publisher()
-        await kafka_infra.dispose_producer()
 
 
 if __name__ == "__main__":

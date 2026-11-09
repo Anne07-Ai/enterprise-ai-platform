@@ -6,11 +6,10 @@ centralized.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID
+from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, delete, select, update
 from sqlalchemy.exc import NoResultFound
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError
 from app.modules.identity.models import (
@@ -20,6 +19,11 @@ from app.modules.identity.models import (
     RefreshToken,
     User,
 )
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 # --- organizations -------------------------------------------------------
 
@@ -54,8 +58,10 @@ async def update_org(session: AsyncSession, *, org_id: UUID, name: str) -> Organ
 
 
 async def delete_org(session: AsyncSession, *, org_id: UUID) -> None:
-    result = await session.execute(delete(Organization).where(Organization.id == org_id))
-    if result.rowcount == 0:
+    deleted_id = await session.scalar(
+        delete(Organization).where(Organization.id == org_id).returning(Organization.id)
+    )
+    if deleted_id is None:
         raise NotFoundError(f"Organization {org_id} not found.")
 
 
@@ -141,8 +147,10 @@ async def update_membership_role(
 
 
 async def delete_membership(session: AsyncSession, *, membership_id: UUID) -> None:
-    result = await session.execute(delete(Membership).where(Membership.id == membership_id))
-    if result.rowcount == 0:
+    deleted_id = await session.scalar(
+        delete(Membership).where(Membership.id == membership_id).returning(Membership.id)
+    )
+    if deleted_id is None:
         raise NotFoundError(f"Membership {membership_id} not found.")
 
 

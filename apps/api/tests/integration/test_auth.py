@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
-from httpx import AsyncClient
+from typing import TYPE_CHECKING
 
-from tests.integration._helpers import auth_headers, login, make_user_and_org
+import pytest
+
+from tests.integration._helpers import TEST_PASSWORD, auth_headers, login, make_user_and_org
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
 
 pytestmark = pytest.mark.integration
 
@@ -15,7 +19,7 @@ async def test_login_returns_token_pair(client: AsyncClient) -> None:
     await make_user_and_org()
     r = await client.post(
         "/v1/auth/login",
-        json={"email": "owner@example.com", "password": "test-password-1234"},
+        json={"email": "owner@example.com", "password": TEST_PASSWORD},
     )
     assert r.status_code == 200
     body = r.json()
@@ -48,7 +52,7 @@ async def test_refresh_rotates_and_invalidates_old(client: AsyncClient) -> None:
     await make_user_and_org()
     r = await client.post(
         "/v1/auth/login",
-        json={"email": "owner@example.com", "password": "test-password-1234"},
+        json={"email": "owner@example.com", "password": TEST_PASSWORD},
     )
     body = r.json()
     old_refresh = body["refresh_token"]
@@ -72,7 +76,7 @@ async def test_me_requires_auth(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_me_returns_user_and_memberships(client: AsyncClient) -> None:
     await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
     r = await client.get("/v1/me", headers=auth_headers(token))
     assert r.status_code == 200, r.text
     body = r.json()
@@ -86,7 +90,7 @@ async def test_logout_revokes_refresh(client: AsyncClient) -> None:
     await make_user_and_org()
     r = await client.post(
         "/v1/auth/login",
-        json={"email": "owner@example.com", "password": "test-password-1234"},
+        json={"email": "owner@example.com", "password": TEST_PASSWORD},
     )
     body = r.json()
     token = body["access_token"]

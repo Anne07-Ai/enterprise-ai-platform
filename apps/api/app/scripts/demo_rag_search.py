@@ -155,14 +155,11 @@ async def _upload(org_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID:
         return doc.id
 
 
-async def _wait_for_ready(org_id: uuid.UUID, document_id: uuid.UUID, timeout: float) -> int:
+async def _wait_for_ready(org_id: uuid.UUID, document_id: uuid.UUID) -> int:
     """Poll until status=ready. Returns the final chunk_count."""
     sm = get_sessionmaker()
-    deadline = asyncio.get_event_loop().time() + timeout
     last_status = None
     while True:
-        if asyncio.get_event_loop().time() > deadline:
-            raise TimeoutError(f"document {document_id} never reached 'ready' (last={last_status})")
         async with sm() as session, session.begin():
             await session.execute(
                 text("SELECT set_config('app.current_org', :org, true)"),
@@ -217,7 +214,8 @@ async def main() -> int:
     print(f"    bytes={len(SAMPLE_DOCUMENT)}")
 
     print("\n[3] Waiting for workers to process (status transitions)...")
-    chunk_count = await _wait_for_ready(org_id, document_id, timeout=60.0)
+    async with asyncio.timeout(60.0):
+        chunk_count = await _wait_for_ready(org_id, document_id)
     print(f"    READY with chunk_count={chunk_count}")
 
     print("\n[4] Running semantic searches:")

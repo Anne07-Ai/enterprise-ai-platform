@@ -23,13 +23,16 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text as sql_text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.rag import service as rag_service
 from app.modules.rag.embeddings import build_default_provider
+
+if TYPE_CHECKING:
+    from anthropic.types import ToolParam
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +66,7 @@ class DocumentInfo:
 # --- search_documents -----------------------------------------------------
 
 
-SEARCH_DOCUMENTS_SCHEMA: dict[str, Any] = {
+SEARCH_DOCUMENTS_SCHEMA: ToolParam = {
     "name": "search_documents",
     "description": (
         "Semantic search over the user's uploaded documents. "
@@ -132,7 +135,7 @@ async def search_documents(
 # --- get_document ---------------------------------------------------------
 
 
-GET_DOCUMENT_SCHEMA: dict[str, Any] = {
+GET_DOCUMENT_SCHEMA: ToolParam = {
     "name": "get_document",
     "description": (
         "Fetch metadata for a single document by ID. Use this when you "

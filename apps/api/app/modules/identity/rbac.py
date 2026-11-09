@@ -4,11 +4,9 @@ Roles are coarse buckets that map to permission sets. Use ``has_permission``
 or the FastAPI dep ``require_permission`` for fine-grained checks at handlers.
 """
 
-from __future__ import annotations
-
 from enum import StrEnum
 
-from fastapi import Depends
+from fastapi.params import Depends
 
 from app.core.deps import CurrentPrincipalDep
 from app.core.errors import AuthorizationError
@@ -100,7 +98,7 @@ def role_at_least(role: str, threshold: str) -> bool:
     return ROLE_RANK.get(role, -1) >= ROLE_RANK.get(threshold, 99)
 
 
-def require_permission(permission: str) -> object:
+def require_permission(permission: str) -> Depends:
     """FastAPI dep factory: 403 unless the principal's role grants ``permission``.
 
     API keys also flow through here — a key's ``scopes`` list (e.g. ``["org:read"]``)

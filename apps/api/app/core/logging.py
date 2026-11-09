@@ -18,13 +18,15 @@ from __future__ import annotations
 import logging
 import sys
 from contextvars import ContextVar
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from opentelemetry import trace as otel_trace
-from structlog.types import EventDict, Processor
 
-from app.core.config import Settings
+if TYPE_CHECKING:
+    from structlog.types import EventDict, Processor
+
+    from app.core.config import Settings
 
 # --- contextvars ---------------------------------------------------------
 # Middleware writes to these, processors read from them on every log call.

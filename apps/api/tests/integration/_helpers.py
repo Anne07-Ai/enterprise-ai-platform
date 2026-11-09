@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from app.infra.db import get_sessionmaker
 from app.modules.identity.models import Organization, User
 from app.modules.identity.security import hash_password
-from httpx import AsyncClient
 from sqlalchemy import text
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
+
+
+TEST_PASSWORD = "test-password-1234"
 
 
 async def make_user_and_org(
     *,
     email: str = "owner@example.com",
-    password: str = "test-password-1234",
+    password: str = TEST_PASSWORD,
     org_slug: str = "acme",
     org_name: str = "Acme Co.",
 ) -> tuple[User, Organization]:

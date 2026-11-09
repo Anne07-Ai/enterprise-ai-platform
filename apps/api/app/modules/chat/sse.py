@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Union
+from typing import Any
 
 # --- event payloads -------------------------------------------------------
 
@@ -81,14 +81,7 @@ class ErrorEvent:
     code: str = "internal"
 
 
-Event = Union[
-    TokenEvent,
-    ToolUseEvent,
-    ToolResultEvent,
-    CitationsEvent,
-    DoneEvent,
-    ErrorEvent,
-]
+Event = TokenEvent | ToolUseEvent | ToolResultEvent | CitationsEvent | DoneEvent | ErrorEvent
 
 
 # --- wire format ----------------------------------------------------------

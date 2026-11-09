@@ -9,17 +9,22 @@ unit-tested independently of FastAPI.
 from __future__ import annotations
 
 import logging
-import uuid
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.rag.embeddings import EmbeddingProvider
 from app.modules.rag.events import DocumentUploadedV1
 from app.modules.rag.models import Document, DocumentChunk, DocumentStatus
 from app.modules.rag.schemas import DocumentChunkOut, DocumentSearchHit
-from app.modules.rag.storage import DocumentStorage
+
+if TYPE_CHECKING:
+    import uuid
+    from collections.abc import Sequence
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.modules.rag.embeddings import EmbeddingProvider
+    from app.modules.rag.storage import DocumentStorage
 
 logger = logging.getLogger(__name__)
 

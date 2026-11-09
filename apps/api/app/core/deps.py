@@ -4,8 +4,6 @@ Imports here are kept minimal so route modules can ``from app.core.deps import .
 without dragging the world along.
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
