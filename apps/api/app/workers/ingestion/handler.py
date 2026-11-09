@@ -117,13 +117,7 @@ async def handle_document_uploaded(
         # Mark failed + emit failure event. We swallow the exception so
         # the Kafka consumer can commit the offset — this isn't a
         # retry-forever situation, the document is poisoned.
-        logger.exception(
-            "ingestion.failed",
-            extra={
-                "document_id": str(document_id),
-                "error": str(exc),
-            },
-        )
+        logger.error("ingestion.failed (%s)", type(exc).__name__)
         await rag_service.mark_status(
             session,
             document_id=document_id,

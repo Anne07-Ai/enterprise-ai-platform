@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import text
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.infra import kafka as kafka_infra
 from app.infra.db import session_unscoped
@@ -80,6 +81,7 @@ async def enqueue(
 async def _publish_batch(batch_size: int = 100) -> int:
     """Publish up to ``batch_size`` outbox rows. Returns the number published."""
     published = 0
+    oldest_created_at: datetime | None = None
     # The internal publisher scans all tenants, including system events
     # without an org. Keep its RLS bypass local to this batch transaction.
     async with contextlib.asynccontextmanager(session_unscoped)() as session:
@@ -89,7 +91,7 @@ async def _publish_batch(batch_size: int = 100) -> int:
             await session.execute(
                 text(
                     """
-                        SELECT id, topic, key, payload, headers
+                        SELECT id, topic, key, payload, created_at
                           FROM outbox
                          WHERE published_at IS NULL
                          ORDER BY created_at
@@ -106,12 +108,7 @@ async def _publish_batch(batch_size: int = 100) -> int:
             try:
                 await kafka_infra.send(row.topic, payload, key=row.key)
             except Exception as exc:  # pragma: no cover — broker hiccup, retry next tick
-                logger.warning(
-                    "outbox.publish.failed",
-                    topic=row.topic,
-                    outbox_id=str(row.id),
-                    error=str(exc),
-                )
+                logger.warning("outbox.publish.failed", error_type=type(exc).__name__)
                 continue
 
             await session.execute(
@@ -119,8 +116,16 @@ async def _publish_batch(batch_size: int = 100) -> int:
                 {"id": row.id},
             )
             published += 1
-    if published:
-        logger.info("outbox.publish.batch", count=published)
+            if oldest_created_at is None or row.created_at < oldest_created_at:
+                oldest_created_at = row.created_at
+    if oldest_created_at is not None:
+        logger.info(
+            "outbox.publish.batch",
+            count=published,
+            oldest_published_age_seconds=max(
+                0.0, (datetime.now(UTC) - oldest_created_at).total_seconds()
+            ),
+        )
     return published
 
 
@@ -130,7 +135,7 @@ async def _publisher_loop(stop: asyncio.Event, *, interval_seconds: float = 1.0)
         try:
             published = await _publish_batch()
         except Exception as exc:  # pragma: no cover — keep loop alive
-            logger.exception("outbox.publisher.error", error=str(exc))
+            logger.error("outbox.publisher.error", error_type=type(exc).__name__)
             published = 0
         # Backoff a little when the queue was empty.
         if published == 0:
@@ -149,10 +154,30 @@ async def start_publisher() -> None:
 
 async def stop_publisher() -> None:
     global _PUBLISHER_TASK, _PUBLISHER_STOP
-    if _PUBLISHER_STOP is not None:
-        _PUBLISHER_STOP.set()
-    if _PUBLISHER_TASK is not None:
-        with contextlib.suppress(asyncio.CancelledError):
-            await _PUBLISHER_TASK
-    _PUBLISHER_TASK = None
-    _PUBLISHER_STOP = None
+    task, stop = _PUBLISHER_TASK, _PUBLISHER_STOP
+    if task is None or stop is None:
+        return
+
+    stop.set()
+    joined = asyncio.gather(task, return_exceptions=True)
+    try:
+        _, pending = await asyncio.wait(
+            (task,), timeout=get_settings().kafka.shutdown_grace_seconds
+        )
+        if pending:
+            logger.warning("outbox.publisher.shutdown_deadline_exceeded")
+            if not task.cancelling():
+                task.cancel()
+        # Cancellation must finish the transaction rollback before producer
+        # disposal. Kafka may have accepted a record whose ack never arrived.
+        await asyncio.shield(joined)
+        if not task.cancelled():
+            task.result()
+    except asyncio.CancelledError:
+        if not task.done() and not task.cancelling():
+            task.cancel()
+        await joined
+        raise
+    finally:
+        if _PUBLISHER_TASK is task and task.done():
+            _PUBLISHER_TASK = _PUBLISHER_STOP = None

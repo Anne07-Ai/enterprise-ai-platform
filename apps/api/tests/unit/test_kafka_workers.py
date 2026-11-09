@@ -101,3 +101,30 @@ async def test_partial_startup_closes_all_resources(
     worker_io.engine_close.assert_awaited_once()
     if worker is embedding:
         worker_io.embedder_close.assert_awaited_once()
+
+
+async def test_worker_signal_cancels_active_record_without_committing(
+    worker: ModuleType, worker_io: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(worker.get_settings().kafka, "shutdown_grace_seconds", 0.02)
+    stop, rolled_back = asyncio.Event(), asyncio.Event()
+    partition = TopicPartition("test-topic", 0)
+    worker_io.getmany.return_value = {partition: [SimpleNamespace(offset=4, value={})]}
+
+    async def process(*args: object) -> None:
+        stop.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            rolled_back.set()
+
+    worker_io.process.side_effect = process
+    async with asyncio.timeout(1):
+        await worker.run(stop)
+
+    assert rolled_back.is_set()
+    worker_io.commit.assert_not_awaited()
+    worker_io.stop.assert_awaited_once()
+    worker_io.outbox_stop.assert_awaited_once()
+    worker_io.producer_close.assert_awaited_once()
+    worker_io.engine_close.assert_awaited_once()

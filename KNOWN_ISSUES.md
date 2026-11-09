@@ -4,13 +4,13 @@
 
 | Check | Local evidence |
 | --- | --- |
-| Unit tests | 50 passed without dependency URLs or provider credentials. |
+| Unit tests | 64 passed without dependency URLs or provider credentials. |
 | Integration tests | 37 passed against disposable PostgreSQL, Redis, Redpanda, and S3Mock. |
-| Ruff format | All 95 files passed. |
+| Ruff format | All 98 files passed. |
 | Ruff lint | Zero findings. |
-| Strict mypy | Zero errors in 64 source files. |
+| Strict mypy | Zero errors in 65 source files. |
 
-Phase 2 hosted CI verification is pending. The workflow requires lint,
+Phase 3 hosted CI verification is pending. The workflow requires lint,
 strict type checking, unit tests, formatting, and the Kafka integration
 suite. The document roundtrip requires disposable S3-compatible storage.
 The local run used S3Mock. MinIO-specific compatibility remains unverified.
@@ -33,15 +33,18 @@ below verifies actual delivery.
 The outbox can deliver the same event again if Kafka acknowledges it before
 the publisher's database transaction commits. Workers commit the next
 offset after successful processing. On an unhandled processing or commit
-failure they stop consuming and begin cleanup. A stalled publisher can delay
-process exit and replay, so deployments need a supervisor with a bounded
-termination and restart policy.
+failure they stop consuming and begin cleanup. Kafka shutdown has configurable
+stage deadlines, with cancellation joined before database resources close.
+See [Kafka worker operations](docs/runbooks/kafka-workers.md) for supervision
+and recovery.
 
 Tests cover outbox-to-broker publication, retry after a refused connection,
 duplicates after publisher transaction rollback, and worker offset replay.
 A disposable broker restart also verified recovery of an in-flight publish.
-Exactly-once business effects, poison-message handling, and bounded
-publisher shutdown during a sustained outage remain open.
+A disposable outage drill also verified clean SIGTERM during a stalled
+send with the broker offline, and replay after restart. Exactly-once business
+effects, poison-message handling, and bounds during simultaneous dependency
+stalls remain open.
 
 ## Readiness
 
