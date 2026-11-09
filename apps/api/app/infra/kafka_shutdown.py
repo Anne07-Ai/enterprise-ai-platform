@@ -11,6 +11,7 @@ from aiokafka.producer.sender import Sender
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.infra.shutdown_budget import remaining_seconds
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -86,7 +87,7 @@ class ShutdownProducer(AIOKafkaProducer):  # type: ignore[misc]  # aiokafka is u
         self._message_accumulator._closed = True
         settings = get_settings().kafka
         try:
-            async with asyncio.timeout(settings.shutdown_grace_seconds):
+            async with asyncio.timeout(remaining_seconds(settings.shutdown_grace_seconds)):
                 await self.flush()
         except TimeoutError:
             logger.warning("kafka.producer.shutdown_deadline_exceeded")
@@ -94,7 +95,7 @@ class ShutdownProducer(AIOKafkaProducer):  # type: ignore[misc]  # aiokafka is u
             # flush() owns no helper tasks. Cancel the sender and its network
             # requests before failing queued deliveries, then close the client.
             try:
-                async with asyncio.timeout(settings.shutdown_cleanup_seconds):
+                async with asyncio.timeout(remaining_seconds(settings.shutdown_cleanup_seconds)):
                     await self._sender.stop_requests()
             finally:
                 self._fail_pending_deliveries()
@@ -115,9 +116,15 @@ class ShutdownProducer(AIOKafkaProducer):  # type: ignore[misc]  # aiokafka is u
 
 async def _close_client(client: AIOKafkaClient) -> None:
     try:
-        async with asyncio.timeout(get_settings().kafka.shutdown_cleanup_seconds):
+        async with asyncio.timeout(
+            remaining_seconds(get_settings().kafka.shutdown_cleanup_seconds)
+        ):
             await client.close()
     except TimeoutError:
+        # client.close() joins its metadata task before closing transports.
+        # If that join ran out of budget, initiate local socket closure anyway.
+        for connection in tuple(client._conns.values()):
+            connection.close()
         logger.warning("kafka.client.cleanup_deadline_exceeded")
         raise
 
@@ -125,7 +132,19 @@ async def _close_client(client: AIOKafkaClient) -> None:
 async def stop_consumer(consumer: AIOKafkaConsumer) -> None:
     """Bound group leave and release local resources if the broker is unavailable."""
     settings = get_settings().kafka
-    deadline = asyncio.timeout(settings.shutdown_cleanup_seconds)
+    stop_offsets = getattr(consumer, "stop_offset_commits", None)
+    if stop_offsets is not None:
+        try:
+            await stop_offsets(remaining_seconds(settings.shutdown_cleanup_seconds))
+        except (Exception, asyncio.CancelledError):
+            try:
+                await _abort_consumer(consumer)
+                await stop_offsets(remaining_seconds(settings.shutdown_cleanup_seconds))
+            except Exception:
+                logger.warning("kafka.consumer.cleanup_failed")
+            raise
+
+    deadline = asyncio.timeout(remaining_seconds(settings.shutdown_cleanup_seconds))
     try:
         async with deadline:
             await consumer.stop()
@@ -176,7 +195,9 @@ async def _abort_consumer(consumer: AIOKafkaConsumer) -> None:
     for task in tasks:
         task.cancel()
     try:
-        async with asyncio.timeout(get_settings().kafka.shutdown_cleanup_seconds):
+        async with asyncio.timeout(
+            remaining_seconds(get_settings().kafka.shutdown_cleanup_seconds)
+        ):
             await asyncio.gather(*tasks, return_exceptions=True)
             if fetcher is not None and not fetcher._closed:
                 await fetcher.close()

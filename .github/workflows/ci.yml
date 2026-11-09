@@ -71,4 +71,8 @@ jobs:
         env:
           EAIP_ENVIRONMENT: test
           EAIP_OTEL_SAMPLE_RATIO: "0"
-        run: uv run --frozen pytest tests/integration/test_outbox_kafka.py -v --no-cov
+        run: >-
+          uv run --frozen pytest -v --no-cov
+          tests/integration/test_outbox_kafka.py
+          tests/integration/test_kafka_offset_replay.py
+          tests/integration/test_consumer_inbox.py

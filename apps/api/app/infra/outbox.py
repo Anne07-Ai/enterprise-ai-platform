@@ -26,6 +26,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.infra import kafka as kafka_infra
 from app.infra.db import session_unscoped
+from app.infra.shutdown_budget import remaining_seconds
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,6 +104,14 @@ async def _publish_batch(batch_size: int = 100) -> int:
             )
         ).all()
 
+        if rows:
+            logger.info(
+                "outbox.publish.selected",
+                count=len(rows),
+                oldest_selected_age_seconds=max(
+                    0.0, (datetime.now(UTC) - rows[0].created_at).total_seconds()
+                ),
+            )
         for row in rows:
             payload = row.payload if isinstance(row.payload, dict) else dict(row.payload)
             try:
@@ -152,6 +161,18 @@ async def start_publisher() -> None:
     _PUBLISHER_TASK = asyncio.create_task(_publisher_loop(_PUBLISHER_STOP), name="outbox-publisher")
 
 
+def request_publisher_stop() -> None:
+    if _PUBLISHER_STOP is not None:
+        _PUBLISHER_STOP.set()
+
+
+def cancel_pending_publisher() -> None:
+    task = _PUBLISHER_TASK
+    if task is not None and not task.done() and not task.cancelling():
+        logger.warning("outbox.publisher.shutdown_deadline_exceeded")
+        task.cancel()
+
+
 async def stop_publisher() -> None:
     global _PUBLISHER_TASK, _PUBLISHER_STOP
     task, stop = _PUBLISHER_TASK, _PUBLISHER_STOP
@@ -162,12 +183,11 @@ async def stop_publisher() -> None:
     joined = asyncio.gather(task, return_exceptions=True)
     try:
         _, pending = await asyncio.wait(
-            (task,), timeout=get_settings().kafka.shutdown_grace_seconds
+            (task,),
+            timeout=remaining_seconds(get_settings().kafka.shutdown_grace_seconds, drain=True),
         )
         if pending:
-            logger.warning("outbox.publisher.shutdown_deadline_exceeded")
-            if not task.cancelling():
-                task.cancel()
+            cancel_pending_publisher()
         # Cancellation must finish the transaction rollback before producer
         # disposal. Kafka may have accepted a record whose ack never arrived.
         await asyncio.shield(joined)

@@ -8,10 +8,9 @@ Receives one DocumentChunkedV1 payload and:
        - If no, do nothing — wait for the remaining chunks.
 
 Idempotency:
-    UPDATE is naturally idempotent (overwriting with the same value
-    is fine). The 'mark ready' transition is guarded — it only fires
-    when count_chunks_pending_embedding == 0, and only if the document
-    isn't already 'ready'/'failed'.
+    A durable inbox receipt deduplicates a committed event. The vector,
+    ready transition, and outbox row share the receipt's transaction.
+    An external embedding call can repeat if that transaction rolls back.
 
 Failure modes:
     OpenAI returns an error -> the worker re-raises so the Kafka
@@ -32,6 +31,8 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text as sql_text
 
+from app.infra.consumer_inbox import claim_event, parse_event_id
+
 # Import identity models so SQLAlchemy can resolve cross-table FKs
 # when the worker only loads rag models.
 from app.modules.identity import models as _identity_models  # noqa: F401
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
     from app.modules.rag.embeddings import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
+CONSUMER = "embedding-worker"
 
 
 async def handle_document_chunked(
@@ -59,6 +61,7 @@ async def handle_document_chunked(
     Embeds the chunk and updates the row. If this was the last chunk
     for the document, marks the document ready and emits the event.
     """
+    event_id = parse_event_id(event_payload.get("event_id"))
     org_id = uuid.UUID(event_payload["org_id"])
     document_id = uuid.UUID(event_payload["document_id"])
     chunk_id = uuid.UUID(event_payload["chunk_id"])
@@ -69,6 +72,8 @@ async def handle_document_chunked(
         sql_text("SELECT set_config('app.current_org', :org, true)"),
         {"org": str(org_id)},
     )
+    if not await claim_event(session, org_id=org_id, consumer=CONSUMER, event_id=event_id):
+        return
 
     # ---- 1. embed the chunk ------------------------------------------------
     vectors = await embedder.embed([chunk_text_content])

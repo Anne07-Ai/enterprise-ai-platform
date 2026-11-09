@@ -1,11 +1,11 @@
-"""Operational outbox logs describe only committed progress and safe failures."""
+"""Operational outbox logs distinguish selection, committed progress and safe failures."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from app.infra import kafka, outbox
@@ -44,13 +44,15 @@ async def test_outbox_logs_only_committed_progress(
         kafka, "send", AsyncMock(side_effect=[RuntimeError("private request data"), None, None])
     )
 
+    selection = call("outbox.publish.selected", count=3, oldest_selected_age_seconds=60.0)
     if commit_fails:
         with pytest.raises(RuntimeError, match="commit failed"):
             await outbox._publish_batch()
-        logger.info.assert_not_called()
+        assert logger.info.call_args_list == [selection]
     else:
         assert await outbox._publish_batch() == 2
-        logger.info.assert_called_once_with(
-            "outbox.publish.batch", count=2, oldest_published_age_seconds=20.0
-        )
+        assert logger.info.call_args_list == [
+            selection,
+            call("outbox.publish.batch", count=2, oldest_published_age_seconds=20.0),
+        ]
     logger.warning.assert_called_once_with("outbox.publish.failed", error_type="RuntimeError")

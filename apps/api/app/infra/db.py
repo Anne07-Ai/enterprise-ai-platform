@@ -13,7 +13,11 @@ primary control. See ADR-0004.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import TYPE_CHECKING, Any, Protocol
+from weakref import WeakSet
 
 from sqlalchemy import event, text
 from sqlalchemy.engine import AdaptedConnection, Engine
@@ -27,9 +31,10 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
+from app.infra.shutdown_budget import remaining_seconds
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
     from uuid import UUID
 
     from sqlalchemy.pool import ConnectionPoolEntry
@@ -44,6 +49,66 @@ class Base(DeclarativeBase):
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+
+
+class _AsyncpgTransport(Protocol):
+    def is_closed(self) -> bool: ...
+    def terminate(self) -> None: ...
+
+
+class WorkerDatabaseConnections:
+    """Track only asyncpg connections checked out by this worker and its tasks."""
+
+    def __init__(self) -> None:
+        self.active: WeakSet[_AsyncpgTransport] = WeakSet()
+        self.aborted = False
+
+    def add(self, connection: _AsyncpgTransport) -> None:
+        if self.aborted:
+            connection.terminate()
+            raise RuntimeError("Worker database connections are closing")
+        self.active.add(connection)
+
+    def abort_active(self) -> int:
+        # Closing a worker's own client transport does not commit the server
+        # transaction. PostgreSQL rolls it back when it processes the disconnect.
+        active = [connection for connection in self.active if not connection.is_closed()]
+        if active:
+            self.aborted = True
+            for connection in active:
+                connection.terminate()
+        return len(active)
+
+
+_worker_connections: ContextVar[WorkerDatabaseConnections | None] = ContextVar(
+    "worker_db_connections", default=None
+)
+
+
+@contextmanager
+def track_worker_database_connections() -> Iterator[WorkerDatabaseConnections]:
+    connections = WorkerDatabaseConnections()
+    token = _worker_connections.set(connections)
+    try:
+        yield connections
+    finally:
+        _worker_connections.reset(token)
+
+
+def _track_worker_checkout(
+    connection: AdaptedConnection, _record: ConnectionPoolEntry, _proxy: object
+) -> None:
+    connections = _worker_connections.get()
+    if connections is not None:
+        connections.add(connection.driver_connection)
+
+
+def _forget_worker_checkin(
+    connection: AdaptedConnection | None, _record: ConnectionPoolEntry
+) -> None:
+    connections = _worker_connections.get()
+    if connections is not None and connection is not None:
+        connections.active.discard(connection.driver_connection)
 
 
 async def _verify_runtime_role(connection: Any) -> None:
@@ -74,6 +139,10 @@ async def _verify_runtime_role(connection: Any) -> None:
 
 
 def _check_runtime_role(connection: AdaptedConnection, _record: ConnectionPoolEntry) -> None:
+    # The role check runs before SQLAlchemy emits checkout.
+    connections = _worker_connections.get()
+    if connections is not None:
+        connections.add(connection.driver_connection)
     connection.run_async(_verify_runtime_role)
 
 
@@ -95,6 +164,8 @@ def _build_engine(settings: Settings) -> AsyncEngine:
     )
 
     event.listen(engine.sync_engine, "connect", _check_runtime_role)
+    event.listen(engine.sync_engine, "checkout", _track_worker_checkout)
+    event.listen(engine.sync_engine, "checkin", _forget_worker_checkin)
 
     return engine
 
@@ -126,14 +197,25 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
 async def dispose_engine() -> None:
     """Dispose async engine. Best-effort during loop teardown."""
     global _engine, _sessionmaker
-    if _engine is not None:
-        try:
-            await _engine.dispose()
-            logger.info("db.engine.disposed")
-        except (RuntimeError, Exception) as e:
-            logger.debug("db.engine.dispose_suppressed", error=str(e))
-    _engine = None
-    _sessionmaker = None
+    engine = _engine
+    if engine is None:
+        return
+    worker = _worker_connections.get() is not None
+    try:
+        if worker:
+            timeout = get_settings().kafka.shutdown_cleanup_seconds
+            async with asyncio.timeout(remaining_seconds(timeout)):
+                await engine.dispose()
+        else:
+            await engine.dispose()
+        logger.info("db.engine.disposed")
+    except Exception as exc:
+        logger.debug("db.engine.dispose_suppressed", error_type=type(exc).__name__)
+        if worker:
+            raise
+    finally:
+        if _engine is engine:
+            _engine = _sessionmaker = None
 
 
 async def session_for_request(*, org_id: UUID | None) -> AsyncIterator[AsyncSession]:

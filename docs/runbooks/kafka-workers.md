@@ -13,9 +13,9 @@ for the API and both workers.
 
 Configure the supervisor to restart failed workers with backoff and report
 repeated failures. An unhandled record-processing or offset-commit error
-stops consumption and starts cleanup. Restarting the same group allows it to resume from Kafka's last committed
-offset. A persistent failure at one offset needs investigation before
-operators alter offsets or group identity.
+stops consumption and starts cleanup. Restarting the same group allows it to
+resume from Kafka's last committed offset. Investigate a persistent failure
+at one offset before altering offsets or group identity.
 
 Send SIGTERM to the Python process for a planned stop. Use a launch command
 that passes signals through or replaces its wrapper process with the worker.
@@ -25,31 +25,37 @@ the backstop for a process that does not exit.
 
 ## Shutdown settings
 
-Configure the following on the API and workers. The worker drain applies
-to ingestion and embedding. The API uses the publisher and producer stages
-during lifespan shutdown. Both settings accept positive finite seconds.
+All settings accept positive finite seconds.
 
 | Setting | Default | Applies to |
 | --- | --- | --- |
-| `EAIP_KAFKA_SHUTDOWN_GRACE_SECONDS` | 5 seconds | The worker's active startup or processing, the outbox publisher's active batch, and the producer's graceful flush. Each stage gets its own budget. |
-| `EAIP_KAFKA_SHUTDOWN_CLEANUP_SECONDS` | 2 seconds | Local Kafka cleanup stages. Consumer group leave and fallback cleanup get separate budgets. |
+| `EAIP_KAFKA_WORKER_SHUTDOWN_TIMEOUT_SECONDS` | 10 seconds | Shared monotonic shutdown budget for ingestion and embedding. |
+| `EAIP_KAFKA_SHUTDOWN_GRACE_SECONDS` | 5 seconds | Cap on active work, outbox drain and producer flush. |
+| `EAIP_KAFKA_SHUTDOWN_CLEANUP_SECONDS` | 2 seconds | Cap on individual cleanup stages. |
 
-On SIGTERM or SIGINT, the worker stops taking new records. An in-flight
-operation can finish during its grace window. On expiry the worker cancels
-and joins the operation, giving its database transaction time to unwind.
-Publisher cancellation similarly waits for rollback before producer disposal.
-A cancelled or unacknowledged outbox batch remains eligible for replay when
-its database transaction rolls back. Kafka can still have accepted a record
-when the sender did not receive its acknowledgement.
+On SIGTERM or SIGINT, a worker starts its shared budget and stops taking new
+records. Its initial drain is limited to the lesser of the grace setting
+and half the total budget. Subsequent stages use their cap or the remaining
+budget, whichever is shorter. Worker failure also starts bounded cleanup.
+The API lifespan still uses the Kafka stage caps independently.
 
-The timeouts are per stage. The configured default Kafka stages can total
-25 seconds before database rollback, resource disposal and event-loop
-scheduling. Set the supervisor termination timeout with margin beyond
-that sum and verify actual process exit with a disposable outage drill.
-Initial Kafka metadata cancellation also depends on the locked SDK's
-startup cleanup. A deadline log
-indicates that a stage exceeded its budget and entered its cancellation or
-fallback path.
+When the initial drain expires, the worker cancels active work and the
+outbox publisher so their database transactions can unwind. If rollback
+stalls, the worker aborts its own active PostgreSQL connections. A database
+transport abort or an exhausted shutdown budget yields exit status 1.
+Unacknowledged work remains eligible for replay when its transaction rolls
+back.
+
+Consumer cleanup gates new offset commits and cancels and joins outstanding
+offset requests before normal Kafka client close. If that join times out,
+cleanup takes the client-abort path. A cancelled request may already have
+reached the broker. On restart, use the broker's committed offset to
+determine where processing resumes.
+
+Give the supervisor more time than the application budget and measure
+actual process exit in a disposable outage drill. The application budget
+depends on the event loop getting scheduled and on dependency code
+responding to cancellation or transport closure.
 
 ## Delivery and replay
 
@@ -62,11 +68,35 @@ retains its payload `event_id`. The Kafka message key is used for
 partitioning and is not a deduplication key.
 
 A consumer commits the next offset for a partition after its handler's
-database transaction succeeds. An unhandled failure leaves its offset
-eligible for replay. A successful transaction followed by a failed offset commit can
-also replay the event. The business handlers have status and row guards, but
-a replay can repeat work such as an embedding provider call. There is no
-general transactional inbox or exactly-once business guarantee.
+database transaction succeeds. Failure before that commit leaves the event
+eligible for replay. If the offset request's wire outcome is ambiguous,
+a restart resumes from the broker's stored value.
+
+Ingestion and embedding claim events for existing organizations in
+`consumer_inbox`, scoped by organization, consumer and event UUID. The
+receipt commits in the same PostgreSQL transaction as the handler's
+database effects and any follow-on outbox rows. A duplicate of a committed receipt skips the handler's
+business effects. A rollback also discards the receipt, allowing replay.
+Events for deleted organizations are skipped. The receipt protects
+committed database effects. An external
+call, such as an embedding request, may already have run before a rollback
+and can run again on replay.
+
+### Inbox rollout
+
+Apply Alembic revision `0003` with the schema-owner login before starting
+the updated workers. Reapply the repository's runtime grants after the
+migration so the restricted login receives `SELECT` and `INSERT` on
+`consumer_inbox`. Follow the [database role instructions](../database-roles.md).
+The inbox uses forced tenant RLS. Finish the worker rollout before relying
+on inbox protection across the group. Dropping the table or deleting
+receipts removes replay protection for those events.
+
+Producers must supply a valid, stable UUID `event_id` in the Kafka payload.
+Preserve that UUID when retrying or replaying the same event and assign a
+new UUID to each distinct event. Missing or malformed IDs fail processing,
+so check legacy events before rollout. An offset reset can replay events
+from before receipts existed.
 
 ## Broker outage triage
 
@@ -92,8 +122,13 @@ general transactional inbox or exactly-once business guarantee.
 ## Monitoring
 
 Compare publisher activity with consumer-group lag. The publisher logs
-`outbox.publish.batch` after the database commits. Its `count` is the
-number of rows marked published. Its `oldest_published_age_seconds` is
+`outbox.publish.selected` before sending a nonempty batch. Its `count`
+and `oldest_selected_age_seconds` describe the unlocked pending rows
+selected for that batch. Rows locked by another publisher and rows
+outside the batch are outside this sample.
+
+The publisher logs `outbox.publish.batch` after the database commits.
+Its `count` is the number of rows marked published. Its `oldest_published_age_seconds` is
 the greatest age among those rows at commit. During an outage, there may
 be no successful samples. Use an authorized backlog monitor if you need
 the age of the oldest row still pending. Consumer-group lag measures how
@@ -105,6 +140,13 @@ Count `outbox.publish.failed` events as failed send attempts.
 recovery without identifying which attempt published a particular row.
 Worker `ingestion.message.failed` and `embedding.message.failed` events
 include the processing or offset-commit stage and exception type.
+Count `kafka.consumer.duplicate` by its fixed `consumer` label to track
+receipt conflicts that skipped handler work. This is a count of
+observed duplicates, including repeated deliveries of the same event.
+
+`kafka.worker.shutdown_finished` reports `duration_seconds`,
+`deadline_exhausted`, and `database_abort` when worker cleanup returns.
+Use supervisor exit timing and restart counts if no finish event arrives.
 
 Track worker exit and restart counts using the supervisor. Track committed
 offsets and group lag using broker-side tooling. Use aggregate labels such
@@ -116,7 +158,8 @@ with the broker outage window.
 
 | Stage | Deadline events |
 | --- | --- |
-| Worker drain | `kafka.worker.shutdown_deadline_exceeded` |
+| Worker drain and total budget | `kafka.worker.shutdown_deadline_exceeded`, `kafka.worker.shutdown_budget_exhausted` |
+| PostgreSQL rollback recovery | `kafka.worker.database_shutdown_aborted` |
 | Consumer close | `kafka.consumer.shutdown_deadline_exceeded`, `kafka.consumer.cleanup_failed` |
 | Outbox drain | `outbox.publisher.shutdown_deadline_exceeded` |
 | Producer close | `kafka.producer.shutdown_deadline_exceeded`, `kafka.producer.stop_failed` |
@@ -136,14 +179,17 @@ schema owner, and truncates test data between cases.
 ```bash
 EAIP_ENVIRONMENT=test EAIP_SKIP_CONTAINERS=0 EAIP_OTEL_SAMPLE_RATIO=0 \
   uv run --frozen pytest --no-cov -v \
-  tests/integration/test_outbox_kafka.py tests/integration/test_healthz.py
+  tests/integration/test_outbox_kafka.py tests/integration/test_consumer_inbox.py \
+  tests/integration/test_healthz.py
 ```
 
 For a broker-outage drill, use a dedicated test broker and a committed
 synthetic outbox event. Observe pending state while the broker is unavailable.
 Restore connectivity, then verify receipt and the outbox marker. For a
 shutdown drill, send SIGTERM during a stalled send or handler. Record the
-application's exit time and whether replay completes after the dependency
-recovers. Record which process and shutdown stage the drill exercised.
-The integration suite covers connection refusal, acknowledgement followed
+application's exit time, exit status, deadline events and whether replay
+completes after the dependency recovers. For a combined outage drill,
+hold a worker-owned database operation and interrupt broker connectivity
+before sending SIGTERM. Verify the interrupted transaction and offset
+outcome after recovery. The integration suite covers connection refusal, acknowledgement followed
 by database rollback, and replay from a failed consumer offset.
