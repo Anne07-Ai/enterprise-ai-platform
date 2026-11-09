@@ -17,11 +17,14 @@ What this test DOES prove:
 from __future__ import annotations
 
 import io
+from typing import TYPE_CHECKING
 
 import pytest
-from httpx import AsyncClient
 
-from tests.integration._helpers import auth_headers, login, make_user_and_org
+from tests.integration._helpers import TEST_PASSWORD, auth_headers, login, make_user_and_org
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
 
 pytestmark = pytest.mark.integration
 
@@ -39,8 +42,8 @@ test we don't run the worker - we just verify the HTTP plane.
 
 @pytest.mark.asyncio
 async def test_upload_list_get_delete_roundtrip(client: AsyncClient) -> None:
-    user, org = await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    _, org = await make_user_and_org()
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
     headers = auth_headers(token)
 
     # --- 1. Upload -------------------------------------------------------
@@ -80,8 +83,8 @@ async def test_upload_list_get_delete_roundtrip(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_upload_rejects_unsupported_mime(client: AsyncClient) -> None:
-    user, org = await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    await make_user_and_org()
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
     headers = auth_headers(token)
 
     files = {"file": ("evil.exe", io.BytesIO(b"MZ\x90"), "application/x-msdownload")}
@@ -92,8 +95,8 @@ async def test_upload_rejects_unsupported_mime(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_upload_rejects_empty_file(client: AsyncClient) -> None:
-    user, org = await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    await make_user_and_org()
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
     headers = auth_headers(token)
 
     files = {"file": ("empty.txt", io.BytesIO(b""), "text/plain")}
@@ -104,8 +107,8 @@ async def test_upload_rejects_empty_file(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_get_nonexistent_document_returns_404(client: AsyncClient) -> None:
-    user, org = await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    await make_user_and_org()
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
     headers = auth_headers(token)
 
     # Random UUID that doesn't exist.

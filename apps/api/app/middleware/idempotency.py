@@ -18,15 +18,27 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from typing import Final
+from contextlib import suppress
+from typing import TYPE_CHECKING, Final, Protocol, cast
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
 from starlette.responses import Response
 
 from app.core.config import get_settings
 from app.core.errors import IdempotencyConflictError, domain_error_handler
 from app.infra.redis import get_redis
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterable
+
+    from starlette.requests import Request
+    from starlette.types import Message
+
+
+class _StreamingBody(Protocol):
+    # Starlette's call_next returns a streaming response typed as Response.
+    body_iterator: AsyncIterable[bytes | memoryview | str | Message]
+
 
 HEADER: Final[str] = "Idempotency-Key"
 MUTATING: Final[frozenset[str]] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -53,8 +65,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         body = await request.body()
-        # Re-hydrate request body so the downstream handler can read it.
-        request._body = body  # type: ignore[attr-defined]
+        # Starlette caches the bytes from body() for the downstream handler.
 
         fingerprint = _fingerprint(request.method, request.url.path, body)
         org_id = getattr(request.state, "org_id", "anon")
@@ -77,15 +88,13 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                     media_type=blob.get("media_type", "application/json"),
                 )
             # Same key, different body — that's a conflict.
-            try:
+            with suppress(Exception):
                 return await domain_error_handler(
                     request,
                     IdempotencyConflictError(
                         "Idempotency-Key reused with a different request body."
                     ),
                 )
-            except Exception:
-                pass
 
         # In-flight detection — short lived lock, the second caller waits up to ~2s.
         lock_key = f"{cache_key}:lock"
@@ -111,8 +120,13 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
             chunks: list[bytes] = []
-            async for c in response.body_iterator:
-                chunks.append(c if isinstance(c, bytes) else c.encode())
+            async for chunk in cast("_StreamingBody", response).body_iterator:
+                if isinstance(chunk, (bytes, memoryview)):
+                    chunks.append(bytes(chunk))
+                elif isinstance(chunk, str):
+                    chunks.append(chunk.encode())
+                else:
+                    raise TypeError("Idempotent responses require an inline body.")
             response_body = b"".join(chunks)
 
             if 200 <= response.status_code < 500:

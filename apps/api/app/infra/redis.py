@@ -2,18 +2,28 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Protocol, cast
+
 from redis.asyncio import ConnectionPool, Redis
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
+if TYPE_CHECKING:
+    from redis.asyncio.connection import Connection
+
+
+class _AsyncClose(Protocol):
+    async def aclose(self) -> None: ...
+
+
 logger = get_logger(__name__)
 
-_pool: ConnectionPool | None = None
-_client: Redis | None = None
+_pool: ConnectionPool[Connection] | None = None
+_client: Redis[bytes] | None = None
 
 
-def get_redis() -> Redis:
+def get_redis() -> Redis[bytes]:
     global _pool, _client
     if _client is None:
         settings = get_settings()
@@ -34,7 +44,8 @@ async def dispose_redis() -> None:
     global _pool, _client
     if _client is not None:
         try:
-            await _client.aclose()
+            # redis>=5.2 supports aclose; the dev stubs predate that API.
+            await cast("_AsyncClose", _client).aclose()
             logger.info("redis.client.disposed")
         except (RuntimeError, Exception) as e:
             logger.debug("redis.client.dispose_suppressed", error=str(e))

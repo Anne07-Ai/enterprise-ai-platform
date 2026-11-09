@@ -28,12 +28,11 @@ What this is NOT:
 from __future__ import annotations
 
 import logging
-import uuid
+from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from anthropic import AsyncAnthropic
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.modules.chat.tools import (
@@ -41,6 +40,15 @@ from app.modules.chat.tools import (
     get_document,
     search_documents,
 )
+
+if TYPE_CHECKING:
+    import uuid
+    from collections.abc import AsyncIterator
+
+    from anthropic.types import ContentBlock, MessageParam, ToolResultBlockParam
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.modules.chat.sse import Event
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +107,7 @@ async def run(
     *,
     org_id: uuid.UUID,
     user_message: str,
-    history: list[dict[str, Any]] | None = None,
+    history: list[MessageParam] | None = None,
 ) -> AgentResult:
     """Run one turn of the agent.
 
@@ -118,7 +126,7 @@ async def run(
         timeout=settings.anthropic.request_timeout_seconds,
     )
 
-    messages: list[dict[str, Any]] = list(history or [])
+    messages: list[MessageParam] = list(history or [])
     messages.append({"role": "user", "content": user_message})
 
     citations_by_key: dict[tuple[str, int], Citation] = {}
@@ -153,7 +161,7 @@ async def run(
                 break
 
             # Process every tool_use block in this turn, in order.
-            tool_results: list[dict[str, Any]] = []
+            tool_results: list[ToolResultBlockParam] = []
             for block in resp.content:
                 if block.type != "tool_use":
                     continue
@@ -181,10 +189,8 @@ async def run(
             )
     finally:
         # AsyncAnthropic uses an underlying httpx client — close it.
-        try:
+        with suppress(Exception):
             await client.close()
-        except Exception:
-            pass
 
     return AgentResult(
         answer=final_text.strip(),
@@ -195,12 +201,12 @@ async def run(
 
 
 async def run_streaming(
-    session,
+    session: AsyncSession,
     *,
-    org_id,
+    org_id: uuid.UUID,
     user_message: str,
-    history=None,
-):
+    history: list[MessageParam] | None = None,
+) -> AsyncIterator[Event]:
     """Stream the agent's progress as SSE events.
 
     Yields :class:`app.modules.chat.sse.Event` instances:
@@ -243,16 +249,13 @@ async def run_streaming(
     messages = list(history or [])
     messages.append({"role": "user", "content": user_message})
 
-    citations_by_key: dict = {}
+    citations_by_key: dict[tuple[str, int], Citation] = {}
     iterations = 0
     truncated = False
 
     try:
         while iterations < MAX_ITERATIONS:
             iterations += 1
-            assistant_blocks: list = []
-            stop_reason = None
-
             async with client.messages.stream(
                 model=settings.anthropic.model,
                 max_tokens=settings.anthropic.max_tokens,
@@ -261,34 +264,27 @@ async def run_streaming(
                 messages=messages,
             ) as stream:
                 async for event in stream:
-                    etype = event.type
-                    if etype == "content_block_delta":
-                        delta = event.delta
-                        if getattr(delta, "type", None) == "text_delta":
-                            yield TokenEvent(text=delta.text)
-                        # input_json_delta for streaming tool args — we
-                        # surface the full tool_use only when complete.
+                    if event.type == "content_block_delta" and event.delta.type == "text_delta":
+                        yield TokenEvent(text=event.delta.text)
 
                 # Final message after stream drains.
                 final = await stream.get_final_message()
-                stop_reason = final.stop_reason
-                assistant_blocks = final.content
 
             # Append assistant turn to history exactly as returned.
-            messages.append({"role": "assistant", "content": assistant_blocks})
+            messages.append({"role": "assistant", "content": final.content})
 
-            if stop_reason == "end_turn":
+            if final.stop_reason == "end_turn":
                 break
 
-            if stop_reason != "tool_use":
+            if final.stop_reason != "tool_use":
                 # Unusual stop_reason — we already streamed any text;
                 # nothing more to emit, just end the turn.
                 break
 
             # Process every tool_use block in this turn, in order.
-            tool_results = []
-            for block in assistant_blocks:
-                if getattr(block, "type", None) != "tool_use":
+            tool_results: list[ToolResultBlockParam] = []
+            for block in final.content:
+                if block.type != "tool_use":
                     continue
                 yield ToolUseEvent(tool=block.name, input=dict(block.input))
                 result_text, hit_count = await _dispatch_tool_streaming(
@@ -334,35 +330,16 @@ async def run_streaming(
         yield ErrorEvent(message=str(exc), code="internal")
         yield DoneEvent(iterations=iterations, truncated=truncated)
     finally:
-        try:
+        with suppress(Exception):
             await client.close()
-        except Exception:
-            pass
 
 
 # --- helpers --------------------------------------------------------------
 
 
-def _extract_text(content: Any) -> str:
-    """Pull text out of an Anthropic content list (list of blocks)."""
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    parts = []
-    for block in content:
-        # Two shapes: SDK objects (block.type, block.text) or dicts.
-        btype = getattr(block, "type", None) or (
-            block.get("type") if isinstance(block, dict) else None
-        )
-        if btype != "text":
-            continue
-        btext = getattr(block, "text", None) or (
-            block.get("text") if isinstance(block, dict) else None
-        )
-        if btext:
-            parts.append(btext)
-    return "\n".join(parts)
+def _extract_text(content: list[ContentBlock]) -> str:
+    """Pull text out of the SDK's response blocks."""
+    return "\n".join(block.text for block in content if block.type == "text" and block.text)
 
 
 async def _dispatch_tool(
@@ -428,12 +405,12 @@ async def _dispatch_tool(
 
 
 async def _dispatch_tool_streaming(
-    session,
+    session: AsyncSession,
     *,
-    org_id,
+    org_id: uuid.UUID,
     tool_name: str,
-    tool_input: dict,
-    citations_sink: dict,
+    tool_input: dict[str, Any],
+    citations_sink: dict[tuple[str, int], Citation],
 ) -> tuple[str, int | None]:
     """Streaming variant of _dispatch_tool that returns (result_text, hit_count).
 

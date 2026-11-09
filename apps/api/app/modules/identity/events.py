@@ -7,13 +7,15 @@ ships these to ``audit.event.v1`` Kafka topic.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
-from uuid import UUID
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import TYPE_CHECKING, Any
 
 from app.core.config import get_settings
 from app.infra.outbox import enqueue
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def emit_audit(

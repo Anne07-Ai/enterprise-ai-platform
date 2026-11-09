@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 # Cancel earlier runs on the same branch when a new commit lands.
 concurrency:
   group: ci-${{ github.ref }}
@@ -25,6 +28,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -49,12 +54,9 @@ jobs:
 
       - name: Lint (ruff)
         run: uv run ruff check .
-        continue-on-error: true # Existing lint findings tracked in KNOWN_ISSUES.md.
 
       - name: Type check (mypy)
         run: uv run mypy app
-        continue-on-error: true
-        # Existing strict typing findings tracked in KNOWN_ISSUES.md.
 
       - name: Unit tests
         env:
@@ -64,5 +66,9 @@ jobs:
       - name: Format check (ruff format --check)
         run: uv run ruff format --check .
 
-  # Integration fixtures provision services and apply migrations. See
-  # KNOWN_ISSUES.md for the status of adding those tests to CI.
+      - name: Kafka integration tests
+        timeout-minutes: 5
+        env:
+          EAIP_ENVIRONMENT: test
+          EAIP_OTEL_SAMPLE_RATIO: "0"
+        run: uv run --frozen pytest tests/integration/test_outbox_kafka.py -v --no-cov

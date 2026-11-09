@@ -12,8 +12,7 @@ import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import jwt
@@ -25,6 +24,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from app.core.config import AuthSettings, get_settings
 from app.core.errors import AuthenticationError
 from app.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = get_logger(__name__)
 

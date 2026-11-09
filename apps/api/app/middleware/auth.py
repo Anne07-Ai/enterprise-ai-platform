@@ -11,19 +11,22 @@ downstream code obtains them via ``get_current_principal`` / ``get_db``.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Final
+from typing import TYPE_CHECKING, Final
 from uuid import UUID
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import Response
 
 from app.core.deps import CurrentPrincipal
 from app.core.errors import AuthenticationError, domain_error_handler
 from app.core.logging import bind_request_context
 from app.infra.db import session_unscoped
 from app.modules.identity.security import verify_access_token
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from starlette.requests import Request
+    from starlette.responses import Response
 
 PUBLIC_PATHS: Final[tuple[str, ...]] = (
     "/healthz",

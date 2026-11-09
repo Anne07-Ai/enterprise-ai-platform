@@ -26,10 +26,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text as sql_text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 # Import identity models so SQLAlchemy can resolve the FK from
 # documents.created_by -> users.id and documents.org_id ->
@@ -46,8 +45,12 @@ from app.modules.rag.events_outbox import (
     emit_document_failed,
 )
 from app.modules.rag.models import DocumentStatus
-from app.modules.rag.storage import DocumentStorage
 from app.workers.ingestion.extractors import ExtractionError, extract_text
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.modules.rag.storage import DocumentStorage
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +79,6 @@ async def handle_document_uploaded(
     document_id = uuid.UUID(event_payload["document_id"])
     storage_uri = event_payload["storage_uri"]
     mime_type = event_payload["mime_type"]
-    name = event_payload["name"]
 
     # Bind RLS to this org for the duration of the transaction.
     await session.execute(
@@ -214,7 +216,7 @@ def _storage_key_from_uri(uri: str) -> str:
         raise ValueError(f"invalid storage_uri: {uri!r}")
     # s3://bucket/key/with/slashes -> split after bucket
     without_scheme = uri[len("s3://") :]
-    bucket, _, key = without_scheme.partition("/")
+    _bucket, _, key = without_scheme.partition("/")
     if not key:
         raise ValueError(f"no key in storage_uri: {uri!r}")
     return key

@@ -19,12 +19,12 @@ Why manual offset commit (enable_auto_commit=False):
 
 Why one consumer group:
     Multiple replicas of this worker can run side-by-side; Kafka will
-    rebalance partitions across them automatically. The single
-    consumer group means we don't double-process the same message.
+    rebalance partitions across them automatically. A crash between the
+    database commit and the offset commit can still cause re-delivery.
 
 Graceful shutdown:
-    SIGTERM / SIGINT triggers _stop_event. The loop finishes the
-    current batch, commits its offsets, and exits cleanly.
+    SIGTERM / SIGINT triggers the stop event. The loop finishes the
+    current record, commits its offset, and exits cleanly.
 """
 
 from __future__ import annotations
@@ -34,19 +34,18 @@ import json
 import logging
 import signal
 import sys
+from contextlib import AsyncExitStack
 from typing import Any
 
 from aiokafka import AIOKafkaConsumer
-from aiokafka.errors import KafkaError
 
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.infra import kafka as kafka_infra
 from app.infra import outbox as outbox_infra
-from app.infra.db import get_sessionmaker
+from app.infra.db import dispose_engine, get_sessionmaker
 from app.modules.rag.events import DocumentUploadedV1
 from app.modules.rag.storage import get_storage
-from app.workers.ingestion.handler import handle_document_uploaded
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +54,9 @@ CONSUMER_GROUP = "ingestion-worker"
 
 async def _process_one(record_value: dict[str, Any]) -> None:
     """Handle one event in its own DB transaction."""
+    # The handler loads tokenizer assets. Defer that until actual ingestion.
+    from app.workers.ingestion.handler import handle_document_uploaded
+
     storage = get_storage()
     sm = get_sessionmaker()
     async with sm() as session, session.begin():
@@ -71,26 +73,28 @@ async def run(stop_event: asyncio.Event) -> None:
         },
     )
 
-    # We need the outbox publisher running so emitted chunked-events
-    # actually get shipped. The worker is its own process and doesn't
-    # share the API's app lifespan.
-    await kafka_infra.get_producer()
-    await outbox_infra.start_publisher()
+    # Register cleanup before startup so a partial failure releases resources.
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(dispose_engine)
+        stack.push_async_callback(kafka_infra.dispose_producer)
+        await kafka_infra.get_producer()
+        stack.push_async_callback(outbox_infra.stop_publisher)
+        await outbox_infra.start_publisher()
 
-    consumer = AIOKafkaConsumer(
-        DocumentUploadedV1.TOPIC,
-        bootstrap_servers=settings.kafka.bootstrap_servers,
-        group_id=CONSUMER_GROUP,
-        client_id=f"{CONSUMER_GROUP}-{settings.kafka.client_id}",
-        enable_auto_commit=False,
-        auto_offset_reset="earliest",
-        max_poll_interval_ms=10 * 60 * 1000,  # 10 min — chunking can be slow
-        value_deserializer=lambda v: json.loads(v.decode()),
-    )
-    await consumer.start()
-    logger.info("ingestion.consumer.started")
+        consumer = AIOKafkaConsumer(
+            DocumentUploadedV1.TOPIC,
+            bootstrap_servers=settings.kafka.bootstrap_servers,
+            group_id=CONSUMER_GROUP,
+            client_id=f"{CONSUMER_GROUP}-{settings.kafka.client_id}",
+            enable_auto_commit=False,
+            auto_offset_reset="earliest",
+            max_poll_interval_ms=10 * 60 * 1000,  # 10 min — chunking can be slow
+            value_deserializer=lambda v: json.loads(v.decode()),
+        )
+        stack.push_async_callback(consumer.stop)
+        await consumer.start()
+        logger.info("ingestion.consumer.started")
 
-    try:
         while not stop_event.is_set():
             try:
                 batch = await asyncio.wait_for(
@@ -106,7 +110,7 @@ async def run(stop_event: asyncio.Event) -> None:
             for tp, records in batch.items():
                 for record in records:
                     if stop_event.is_set():
-                        break
+                        return
                     document_id = record.value.get("document_id", "<unknown>")
                     logger.info(
                         "ingestion.message.received",
@@ -118,33 +122,17 @@ async def run(stop_event: asyncio.Event) -> None:
                     )
                     try:
                         await _process_one(record.value)
+                        # Kafka expects the next offset for this partition. The fetch
+                        # position may already include unprocessed records.
+                        await consumer.commit({tp: record.offset + 1})
                     except Exception:
                         logger.exception(
-                            "ingestion.message.unhandled",
+                            "ingestion.message.failed",
                             extra={"document_id": document_id, "offset": record.offset},
                         )
-                        # Continue — handler already marked failed if it
-                        # got far enough. If it didn't, the message will
-                        # be re-delivered next time the consumer starts
-                        # (offset NOT committed).
-                        continue
-
-            # Commit only the offsets for the batch we just finished.
-            try:
-                await consumer.commit()
-            except KafkaError:
-                logger.exception("ingestion.commit.failed")
-                # If commit fails we'll re-process on restart; that's
-                # safe due to idempotency.
-    finally:
-        logger.info("ingestion.stopping")
-        try:
-            await consumer.stop()
-        except Exception:
-            logger.exception("ingestion.consumer.stop_failed")
-        await outbox_infra.stop_publisher()
-        await kafka_infra.dispose_producer()
-        logger.info("ingestion.stopped")
+                        # Exit so a restarted worker resumes from the last committed
+                        # offset instead of passing the failed record.
+                        raise
 
 
 def _install_signal_handlers(loop: asyncio.AbstractEventLoop, stop_event: asyncio.Event) -> None:

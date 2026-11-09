@@ -11,10 +11,9 @@ like login.
 
 from __future__ import annotations
 
-from uuid import UUID
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import (
     AuthenticationError,
@@ -38,6 +37,11 @@ from app.modules.identity.security import (
     mint_refresh_token,
     verify_password,
 )
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 # --- orgs ----------------------------------------------------------------
 
@@ -264,7 +268,7 @@ async def authenticate(
             "User belongs to multiple organizations. Pass `org_slug` to disambiguate."
         )
 
-    access_token, _, exp = mint_access_token(user_id=user.id, org_id=org.id, role=membership.role)
+    access_token, _, _ = mint_access_token(user_id=user.id, org_id=org.id, role=membership.role)
     refresh_token, refresh_hash, refresh_exp = mint_refresh_token(user_id=user.id, org_id=org.id)
     await repo.store_refresh_token(
         session,

@@ -18,12 +18,18 @@ client to avoid coupling to global state.
 from __future__ import annotations
 
 import logging
-from uuid import UUID
+from typing import TYPE_CHECKING
 
 import aioboto3
 from botocore.config import Config
 
 from app.core.config import get_settings
+
+if TYPE_CHECKING:
+    from contextlib import AbstractAsyncContextManager
+    from uuid import UUID
+
+    from aioboto3 import _S3Client
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +64,7 @@ class DocumentStorage:
         # path-style addressing — required for MinIO, harmless for S3.
         self._config = Config(s3={"addressing_style": "path"}, signature_version="s3v4")
 
-    def _client_ctx(self):
+    def _client_ctx(self) -> AbstractAsyncContextManager[_S3Client]:
         return self._session.client(
             "s3",
             endpoint_url=self._endpoint,

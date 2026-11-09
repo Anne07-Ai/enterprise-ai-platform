@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
-from httpx import AsyncClient
+from typing import TYPE_CHECKING
 
-from tests.integration._helpers import auth_headers, login, make_user_and_org
+import pytest
+
+from tests.integration._helpers import TEST_PASSWORD, auth_headers, login, make_user_and_org
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
 
 pytestmark = pytest.mark.integration
 
@@ -13,7 +17,7 @@ pytestmark = pytest.mark.integration
 @pytest.mark.asyncio
 async def test_plaintext_returned_only_on_create(client: AsyncClient) -> None:
     await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
     create = await client.post(
         "/v1/api-keys",
         json={"name": "build-bot", "scopes": ["org:read"]},
@@ -23,7 +27,6 @@ async def test_plaintext_returned_only_on_create(client: AsyncClient) -> None:
     body = create.json()
     assert body["plaintext"].startswith("eaip_test_")
     assert body["prefix"].startswith("eaip_test_")
-    plaintext = body["plaintext"]
 
     listed = await client.get("/v1/api-keys", headers=auth_headers(token))
     assert listed.status_code == 200
@@ -35,7 +38,7 @@ async def test_plaintext_returned_only_on_create(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_api_key_can_authenticate_then_revoke(client: AsyncClient) -> None:
     await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
     create = await client.post(
         "/v1/api-keys",
         json={"name": "k", "scopes": ["org:read"]},
@@ -45,13 +48,6 @@ async def test_api_key_can_authenticate_then_revoke(client: AsyncClient) -> None
     key_id = create.json()["id"]
 
     # The API key authenticates.
-    r = await client.get(
-        f"/v1/orgs/{create.json()['id'][:0]}",
-        headers={"X-Api-Key": plaintext},
-    )
-    # Either 404 (org id segment is empty) or 401 — what we care about is that
-    # the key is recognized so we don't get a 401-from-auth-middleware. So we
-    # try a real org endpoint instead.
     me_r = await client.get("/v1/api-keys", headers={"X-Api-Key": plaintext})
     assert me_r.status_code == 200, me_r.text
 

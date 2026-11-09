@@ -13,11 +13,15 @@ to measure the cost.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import Response
 
 from app.middleware.auth import PUBLIC_PATHS, _is_public
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
+    from starlette.responses import Response
 
 
 class TenantMiddleware(BaseHTTPMiddleware):

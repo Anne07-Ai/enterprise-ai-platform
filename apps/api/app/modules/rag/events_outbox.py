@@ -10,7 +10,7 @@ loop (started in app.main) — this module only writes the outbox row.
 
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import TYPE_CHECKING
 
 from app.infra.outbox import enqueue
 from app.modules.rag.events import (
@@ -19,6 +19,9 @@ from app.modules.rag.events import (
     DocumentReadyV1,
     DocumentUploadedV1,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def emit_document_uploaded(session: AsyncSession, event: DocumentUploadedV1) -> None:

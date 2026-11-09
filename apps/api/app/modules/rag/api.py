@@ -12,8 +12,6 @@ Endpoints:
     POST   /v1/documents/search        — semantic search
 """
 
-from __future__ import annotations
-
 import logging
 import uuid
 from typing import Annotated

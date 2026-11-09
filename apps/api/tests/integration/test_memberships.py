@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
-from httpx import AsyncClient
+from typing import TYPE_CHECKING
 
-from tests.integration._helpers import auth_headers, login, make_user_and_org
+import pytest
+
+from tests.integration._helpers import TEST_PASSWORD, auth_headers, login, make_user_and_org
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
 
 pytestmark = pytest.mark.integration
 
@@ -13,7 +17,7 @@ pytestmark = pytest.mark.integration
 @pytest.mark.asyncio
 async def test_invite_lists_member(client: AsyncClient) -> None:
     _, org = await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
     r = await client.post(
         f"/v1/orgs/{org.id}/memberships",
         json={"email": "new@example.com", "role": "member"},
@@ -31,7 +35,7 @@ async def test_invite_lists_member(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_change_member_role(client: AsyncClient) -> None:
     _, org = await make_user_and_org()
-    token = await login(client, email="owner@example.com", password="test-password-1234")
+    token = await login(client, email="owner@example.com", password=TEST_PASSWORD)
     invite = await client.post(
         f"/v1/orgs/{org.id}/memberships",
         json={"email": "elev@example.com", "role": "member"},

@@ -9,7 +9,7 @@ TRUNCATE between tests rather than container restart to keep the loop fast.
 from __future__ import annotations
 
 import os
-from contextlib import contextmanager
+from contextlib import AsyncExitStack, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -203,47 +203,18 @@ async def db_for_org() -> object:
     return _factory
 
 
-# --- Reset module-level singletons between tests ---
-# Module-level singletons (engine, sessionmaker, redis pool, kafka producer)
-# get bound to the event loop active at first use. With per-test loops, the
-# next test reuses objects bound to a dead loop -> InterfaceError storms and
-# "Connection._cancel was never awaited" warnings. We reset them per test.
 @pytest_asyncio.fixture(autouse=True)
-async def _reset_infra_singletons() -> AsyncIterator[None]:
+async def _dispose_infra_singletons() -> AsyncIterator[None]:
+    """Close shared clients on the same function loop that opened them."""
     from app.infra import db as _db
     from app.infra import kafka as _kafka
     from app.infra import redis as _redis
 
-    # Pre-test: clear any leftover singletons.
-    _db._engine = None
-    _db._sessionmaker = None
-    _redis._pool = None
-    _redis._client = None
-    _kafka._producer = None
-
-    yield
-
-    # Post-test: best-effort dispose.
-    try:
-        if _db._engine is not None:
-            await _db._engine.dispose()
-    except Exception:
-        pass
-    try:
-        if _kafka._producer is not None:
-            await _kafka._producer.stop()
-    except Exception:
-        pass
-    try:
-        if _redis._client is not None:
-            await _redis._client.aclose()
-    except Exception:
-        pass
-    _db._engine = None
-    _db._sessionmaker = None
-    _redis._pool = None
-    _redis._client = None
-    _kafka._producer = None
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(_db.dispose_engine)
+        stack.push_async_callback(_redis.dispose_redis)
+        stack.push_async_callback(_kafka.dispose_producer)
+        yield
 
 
 # --- HTTP client --------------------------------------------------------

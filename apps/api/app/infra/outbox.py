@@ -3,7 +3,9 @@
 Request handlers write to the ``outbox`` table inside the SAME transaction
 that mutates application state. A background publisher polls the outbox,
 publishes to Kafka, and marks rows as published. This guarantees we never
-dual-write — if the DB transaction rolls back, the event is gone too.
+dual-write from the request handler. A rollback of that transaction removes
+the outbox row. Publication is at least once: if Kafka acknowledges a send
+before the publisher's DB transaction fails, the same event may be sent again.
 
 A future migration can switch the publisher implementation to Debezium CDC
 without changing the producer-side code.

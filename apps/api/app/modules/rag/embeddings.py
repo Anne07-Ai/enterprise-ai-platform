@@ -20,11 +20,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import httpx
-from pydantic import SecretStr
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from pydantic import SecretStr
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +112,7 @@ class OpenAIEmbeddingProvider:
             try:
                 await self._client.aclose()
             except Exception:
-                pass
+                logger.warning("openai.embeddings.client_close_failed")
             self._client = None
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:

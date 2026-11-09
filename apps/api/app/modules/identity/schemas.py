@@ -90,7 +90,7 @@ class LoginRequest(BaseModel):
 class TokenPair(BaseModel):
     access_token: str
     refresh_token: str
-    token_type: str = "Bearer"
+    token_type: str = Field(default="Bearer")
     expires_in: int
 
 

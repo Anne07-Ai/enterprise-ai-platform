@@ -117,13 +117,10 @@ async def _upload(org_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID:
         return doc.id
 
 
-async def _wait_ready(org_id: uuid.UUID, doc_id: uuid.UUID, timeout: float = 60.0) -> None:
+async def _wait_ready(org_id: uuid.UUID, doc_id: uuid.UUID) -> None:
     sm = get_sessionmaker()
-    deadline = asyncio.get_event_loop().time() + timeout
     last = None
     while True:
-        if asyncio.get_event_loop().time() > deadline:
-            raise TimeoutError(f"document {doc_id} never reached ready (last={last})")
         async with sm() as session, session.begin():
             await session.execute(
                 text("SELECT set_config('app.current_org', :org, true)"),
@@ -156,7 +153,8 @@ async def main() -> int:
     print(f"    document_id={doc_id}")
 
     print("\n[3] Waiting for workers...")
-    await _wait_ready(org_id, doc_id)
+    async with asyncio.timeout(60.0):
+        await _wait_ready(org_id, doc_id)
     print("    READY")
 
     print("\n[4] Running agent against three questions:")

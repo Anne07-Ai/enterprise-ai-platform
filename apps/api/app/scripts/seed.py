@@ -74,7 +74,8 @@ async def _seed() -> None:
             logger.info("seed.org.exists", org_id=str(org.id))
 
     print(
-        f"\nDemo credentials:\n  email:    {DEMO_EMAIL}\n  password: {DEMO_PASSWORD}\n  org slug: {DEMO_ORG_SLUG}\n"
+        f"\nDemo credentials:\n  email:    {DEMO_EMAIL}\n"
+        f"  password: {DEMO_PASSWORD}\n  org slug: {DEMO_ORG_SLUG}\n"
     )
 
 
