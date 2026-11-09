@@ -128,7 +128,7 @@ async def started_client(
         redis_infra, "get_redis", Mock(return_value=SimpleNamespace(ping=redis_ping))
     )
     monkeypatch.setattr(redis_infra, "dispose_redis", AsyncMock(side_effect=on_startup_loop))
-    monkeypatch.setattr(kafka, "AIOKafkaProducer", Mock(return_value=producer))
+    monkeypatch.setattr(kafka, "ShutdownProducer", Mock(return_value=producer))
     monkeypatch.setattr(outbox, "start_publisher", AsyncMock(side_effect=on_startup_loop))
     monkeypatch.setattr(outbox, "stop_publisher", AsyncMock(side_effect=on_startup_loop))
 
@@ -158,7 +158,7 @@ async def test_kafka_start_failure_closes_candidate_and_allows_retry(
     )
     healthy = SimpleNamespace(start=AsyncMock(), stop=AsyncMock())
     constructor = Mock(side_effect=[failed, healthy])
-    monkeypatch.setattr(kafka, "AIOKafkaProducer", constructor)
+    monkeypatch.setattr(kafka, "ShutdownProducer", constructor)
 
     with pytest.raises(RuntimeError, match="start failed"):
         await kafka.get_producer()
@@ -188,7 +188,7 @@ async def test_kafka_callers_wait_for_one_started_producer(
 
     producer = SimpleNamespace(start=AsyncMock(side_effect=start), stop=AsyncMock())
     constructor = Mock(return_value=producer)
-    monkeypatch.setattr(kafka, "AIOKafkaProducer", constructor)
+    monkeypatch.setattr(kafka, "ShutdownProducer", constructor)
     first = asyncio.create_task(kafka.get_producer())
     await starting.wait()
     second = asyncio.create_task(get_second())
@@ -217,7 +217,7 @@ async def test_kafka_cancelled_start_releases_candidate(
         await asyncio.Event().wait()
 
     producer = SimpleNamespace(start=AsyncMock(side_effect=start), stop=AsyncMock())
-    monkeypatch.setattr(kafka, "AIOKafkaProducer", Mock(return_value=producer))
+    monkeypatch.setattr(kafka, "ShutdownProducer", Mock(return_value=producer))
     task = asyncio.create_task(kafka.get_producer())
     await starting.wait()
     task.cancel()

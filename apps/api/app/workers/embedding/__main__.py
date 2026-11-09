@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import signal
 import sys
 from contextlib import AsyncExitStack
@@ -32,15 +31,17 @@ from typing import Any
 from aiokafka import AIOKafkaConsumer
 
 from app.core.config import get_settings
-from app.core.logging import setup_logging
+from app.core.logging import get_logger, setup_logging
 from app.infra import kafka as kafka_infra
 from app.infra import outbox as outbox_infra
 from app.infra.db import dispose_engine, get_sessionmaker
+from app.infra.kafka_shutdown import stop_consumer
 from app.modules.rag.embeddings import EmbeddingProvider, build_default_provider
 from app.modules.rag.events import DocumentChunkedV1
+from app.workers import run_until_stopped
 from app.workers.embedding.handler import handle_document_chunked
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 CONSUMER_GROUP = "embedding-worker"
 
@@ -53,79 +54,78 @@ async def _process_one(embedder: EmbeddingProvider, record_value: dict[str, Any]
 
 
 async def run(stop_event: asyncio.Event) -> None:
+    # The signal deadline cancels startup or processing. Cleanup runs after
+    # the child task has finished unwinding its current DB transaction.
+    async with AsyncExitStack() as stack:
+        await run_until_stopped(_consume(stop_event, stack), stop_event)
+
+
+async def _consume(stop_event: asyncio.Event, stack: AsyncExitStack) -> None:
     settings = get_settings()
-    logger.info(
-        "embedding.starting",
-        extra={
-            "bootstrap_servers": settings.kafka.bootstrap_servers,
-            "group": CONSUMER_GROUP,
-        },
-    )
+    logger.info("embedding.starting", group=CONSUMER_GROUP)
 
     # Register cleanup before startup so a partial failure releases resources.
-    async with AsyncExitStack() as stack:
-        stack.push_async_callback(dispose_engine)
-        stack.push_async_callback(kafka_infra.dispose_producer)
-        await kafka_infra.get_producer()
-        stack.push_async_callback(outbox_infra.stop_publisher)
-        await outbox_infra.start_publisher()
-        embedder = build_default_provider()
-        stack.push_async_callback(embedder.aclose)
+    stack.push_async_callback(dispose_engine)
+    stack.push_async_callback(kafka_infra.dispose_producer)
+    await kafka_infra.get_producer()
+    stack.push_async_callback(outbox_infra.stop_publisher)
+    await outbox_infra.start_publisher()
+    embedder = build_default_provider()
+    stack.push_async_callback(embedder.aclose)
 
-        consumer = AIOKafkaConsumer(
-            DocumentChunkedV1.TOPIC,
-            bootstrap_servers=settings.kafka.bootstrap_servers,
-            group_id=CONSUMER_GROUP,
-            client_id=f"{CONSUMER_GROUP}-{settings.kafka.client_id}",
-            enable_auto_commit=False,
-            auto_offset_reset="earliest",
-            max_poll_interval_ms=5 * 60 * 1000,  # 5 min — OpenAI calls can be slow
-            value_deserializer=lambda v: json.loads(v.decode()),
-        )
-        stack.push_async_callback(consumer.stop)
-        await consumer.start()
-        logger.info("embedding.consumer.started")
+    consumer = AIOKafkaConsumer(
+        DocumentChunkedV1.TOPIC,
+        bootstrap_servers=settings.kafka.bootstrap_servers,
+        group_id=CONSUMER_GROUP,
+        client_id=f"{CONSUMER_GROUP}-{settings.kafka.client_id}",
+        enable_auto_commit=False,
+        auto_offset_reset="earliest",
+        max_poll_interval_ms=5 * 60 * 1000,  # 5 min — OpenAI calls can be slow
+        value_deserializer=lambda v: json.loads(v.decode()),
+    )
+    stack.push_async_callback(stop_consumer, consumer)
+    await consumer.start()
+    logger.info("embedding.consumer.started")
 
-        while not stop_event.is_set():
-            try:
-                batch = await asyncio.wait_for(
-                    consumer.getmany(timeout_ms=1000, max_records=10),
-                    timeout=2.0,
+    while not stop_event.is_set():
+        try:
+            batch = await asyncio.wait_for(
+                consumer.getmany(timeout_ms=1000, max_records=10),
+                timeout=2.0,
+            )
+        except TimeoutError:
+            continue
+
+        if not batch:
+            continue
+
+        for tp, records in batch.items():
+            for record in records:
+                if stop_event.is_set():
+                    return
+                logger.info(
+                    "embedding.message.received",
+                    partition=tp.partition,
+                    offset=record.offset,
                 )
-            except TimeoutError:
-                continue
-
-            if not batch:
-                continue
-
-            for tp, records in batch.items():
-                for record in records:
-                    if stop_event.is_set():
-                        return
-                    chunk_id = record.value.get("chunk_id", "<unknown>")
-                    document_id = record.value.get("document_id", "<unknown>")
-                    logger.info(
-                        "embedding.message.received",
-                        extra={
-                            "partition": tp.partition,
-                            "offset": record.offset,
-                            "chunk_id": chunk_id,
-                            "document_id": document_id,
-                        },
+                stage = "processing"
+                try:
+                    await _process_one(embedder, record.value)
+                    # Kafka expects the next offset for this partition. The fetch
+                    # position may already include unprocessed records.
+                    stage = "offset_commit"
+                    await consumer.commit({tp: record.offset + 1})
+                except Exception as exc:
+                    logger.error(
+                        "embedding.message.failed",
+                        stage=stage,
+                        partition=tp.partition,
+                        offset=record.offset,
+                        error_type=type(exc).__name__,
                     )
-                    try:
-                        await _process_one(embedder, record.value)
-                        # Kafka expects the next offset for this partition. The fetch
-                        # position may already include unprocessed records.
-                        await consumer.commit({tp: record.offset + 1})
-                    except Exception:
-                        logger.exception(
-                            "embedding.message.failed",
-                            extra={"document_id": document_id, "offset": record.offset},
-                        )
-                        # Exit so a restarted worker resumes from the last committed
-                        # offset instead of passing the failed record.
-                        raise
+                    # Exit so a restarted worker resumes from the last committed
+                    # offset instead of passing the failed record.
+                    raise
 
 
 def _install_signal_handlers(loop: asyncio.AbstractEventLoop, stop_event: asyncio.Event) -> None:
@@ -139,8 +139,8 @@ async def amain() -> int:
     _install_signal_handlers(asyncio.get_running_loop(), stop_event)
     try:
         await run(stop_event)
-    except Exception:
-        logger.exception("embedding.fatal")
+    except Exception as exc:
+        logger.error("embedding.fatal", error_type=type(exc).__name__)
         return 1
     return 0
 

@@ -14,8 +14,8 @@ Why manual offset commit (enable_auto_commit=False):
     Auto-commit ships offsets on a timer regardless of whether the
     handler succeeded. We commit only after successful processing so
     a crash mid-handler causes Kafka to re-deliver the message — at
-    which point the handler's idempotency guards (status transitions,
-    UNIQUE chunk index) make re-processing safe.
+    which point the handler's status and uniqueness guards reduce
+    repeated effects. They do not provide durable event deduplication.
 
 Why one consumer group:
     Multiple replicas of this worker can run side-by-side; Kafka will
@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import signal
 import sys
 from contextlib import AsyncExitStack
@@ -40,14 +39,16 @@ from typing import Any
 from aiokafka import AIOKafkaConsumer
 
 from app.core.config import get_settings
-from app.core.logging import setup_logging
+from app.core.logging import get_logger, setup_logging
 from app.infra import kafka as kafka_infra
 from app.infra import outbox as outbox_infra
 from app.infra.db import dispose_engine, get_sessionmaker
+from app.infra.kafka_shutdown import stop_consumer
 from app.modules.rag.events import DocumentUploadedV1
 from app.modules.rag.storage import get_storage
+from app.workers import run_until_stopped
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 CONSUMER_GROUP = "ingestion-worker"
 
@@ -64,75 +65,76 @@ async def _process_one(record_value: dict[str, Any]) -> None:
 
 
 async def run(stop_event: asyncio.Event) -> None:
+    # The signal deadline cancels startup or processing. Cleanup runs after
+    # the child task has finished unwinding its current DB transaction.
+    async with AsyncExitStack() as stack:
+        await run_until_stopped(_consume(stop_event, stack), stop_event)
+
+
+async def _consume(stop_event: asyncio.Event, stack: AsyncExitStack) -> None:
     settings = get_settings()
-    logger.info(
-        "ingestion.starting",
-        extra={
-            "bootstrap_servers": settings.kafka.bootstrap_servers,
-            "group": CONSUMER_GROUP,
-        },
-    )
+    logger.info("ingestion.starting", group=CONSUMER_GROUP)
 
     # Register cleanup before startup so a partial failure releases resources.
-    async with AsyncExitStack() as stack:
-        stack.push_async_callback(dispose_engine)
-        stack.push_async_callback(kafka_infra.dispose_producer)
-        await kafka_infra.get_producer()
-        stack.push_async_callback(outbox_infra.stop_publisher)
-        await outbox_infra.start_publisher()
+    stack.push_async_callback(dispose_engine)
+    stack.push_async_callback(kafka_infra.dispose_producer)
+    await kafka_infra.get_producer()
+    stack.push_async_callback(outbox_infra.stop_publisher)
+    await outbox_infra.start_publisher()
 
-        consumer = AIOKafkaConsumer(
-            DocumentUploadedV1.TOPIC,
-            bootstrap_servers=settings.kafka.bootstrap_servers,
-            group_id=CONSUMER_GROUP,
-            client_id=f"{CONSUMER_GROUP}-{settings.kafka.client_id}",
-            enable_auto_commit=False,
-            auto_offset_reset="earliest",
-            max_poll_interval_ms=10 * 60 * 1000,  # 10 min — chunking can be slow
-            value_deserializer=lambda v: json.loads(v.decode()),
-        )
-        stack.push_async_callback(consumer.stop)
-        await consumer.start()
-        logger.info("ingestion.consumer.started")
+    consumer = AIOKafkaConsumer(
+        DocumentUploadedV1.TOPIC,
+        bootstrap_servers=settings.kafka.bootstrap_servers,
+        group_id=CONSUMER_GROUP,
+        client_id=f"{CONSUMER_GROUP}-{settings.kafka.client_id}",
+        enable_auto_commit=False,
+        auto_offset_reset="earliest",
+        max_poll_interval_ms=10 * 60 * 1000,  # 10 min — chunking can be slow
+        value_deserializer=lambda v: json.loads(v.decode()),
+    )
+    stack.push_async_callback(stop_consumer, consumer)
+    await consumer.start()
+    logger.info("ingestion.consumer.started")
 
-        while not stop_event.is_set():
-            try:
-                batch = await asyncio.wait_for(
-                    consumer.getmany(timeout_ms=1000, max_records=10),
-                    timeout=2.0,
+    while not stop_event.is_set():
+        try:
+            batch = await asyncio.wait_for(
+                consumer.getmany(timeout_ms=1000, max_records=10),
+                timeout=2.0,
+            )
+        except TimeoutError:
+            continue
+
+        if not batch:
+            continue
+
+        for tp, records in batch.items():
+            for record in records:
+                if stop_event.is_set():
+                    return
+                logger.info(
+                    "ingestion.message.received",
+                    partition=tp.partition,
+                    offset=record.offset,
                 )
-            except TimeoutError:
-                continue
-
-            if not batch:
-                continue
-
-            for tp, records in batch.items():
-                for record in records:
-                    if stop_event.is_set():
-                        return
-                    document_id = record.value.get("document_id", "<unknown>")
-                    logger.info(
-                        "ingestion.message.received",
-                        extra={
-                            "partition": tp.partition,
-                            "offset": record.offset,
-                            "document_id": document_id,
-                        },
+                stage = "processing"
+                try:
+                    await _process_one(record.value)
+                    # Kafka expects the next offset for this partition. The fetch
+                    # position may already include unprocessed records.
+                    stage = "offset_commit"
+                    await consumer.commit({tp: record.offset + 1})
+                except Exception as exc:
+                    logger.error(
+                        "ingestion.message.failed",
+                        stage=stage,
+                        partition=tp.partition,
+                        offset=record.offset,
+                        error_type=type(exc).__name__,
                     )
-                    try:
-                        await _process_one(record.value)
-                        # Kafka expects the next offset for this partition. The fetch
-                        # position may already include unprocessed records.
-                        await consumer.commit({tp: record.offset + 1})
-                    except Exception:
-                        logger.exception(
-                            "ingestion.message.failed",
-                            extra={"document_id": document_id, "offset": record.offset},
-                        )
-                        # Exit so a restarted worker resumes from the last committed
-                        # offset instead of passing the failed record.
-                        raise
+                    # Exit so a restarted worker resumes from the last committed
+                    # offset instead of passing the failed record.
+                    raise
 
 
 def _install_signal_handlers(loop: asyncio.AbstractEventLoop, stop_event: asyncio.Event) -> None:
@@ -146,8 +148,8 @@ async def amain() -> int:
     _install_signal_handlers(asyncio.get_running_loop(), stop_event)
     try:
         await run(stop_event)
-    except Exception:
-        logger.exception("ingestion.fatal")
+    except Exception as exc:
+        logger.error("ingestion.fatal", error_type=type(exc).__name__)
         return 1
     return 0
 

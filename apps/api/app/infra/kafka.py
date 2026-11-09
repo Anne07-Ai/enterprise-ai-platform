@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from aiokafka import AIOKafkaProducer
 from opentelemetry import propagate
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.infra.kafka_shutdown import ShutdownProducer
+
+if TYPE_CHECKING:
+    from aiokafka import AIOKafkaProducer
 
 logger = get_logger(__name__)
 
@@ -49,7 +52,7 @@ async def get_producer() -> AIOKafkaProducer:
         if _producer is not None:
             return _producer
         settings = get_settings()
-        producer = AIOKafkaProducer(
+        producer = ShutdownProducer(
             bootstrap_servers=settings.kafka.bootstrap_servers,
             client_id=settings.kafka.client_id,
             enable_idempotence=settings.kafka.enable_idempotence,
